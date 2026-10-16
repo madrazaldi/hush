@@ -15,6 +15,27 @@ use crate::shell_env;
 
 const TIMEOUT: Duration = Duration::from_secs(600);
 
+/// Codex tools Hush never needs. Text in, text out.
+const CODEX_DISABLED_FEATURES: &[&str] = &[
+    "shell_tool",
+    "unified_exec",
+    "view_image",
+    "apps",
+    "plugins",
+    "browser_use",
+    "browser_use_external",
+    "computer_use",
+    "in_app_browser",
+    "image_generation",
+    "multi_agent",
+    "multi_agent_v2",
+    "skill_search",
+    "tool_suggest",
+    "memories",
+    "hooks",
+    "code_mode_host",
+];
+
 struct Invocation {
     args: Vec<String>,
     stdin: Option<String>,
@@ -79,6 +100,14 @@ fn build(profile: &LlmProfile, req: &ChatRequest, workdir: &Path) -> Invocation 
                 .map(String::from),
             );
             args.push(workdir.to_string_lossy().into_owned());
+            // The read-only sandbox still lets tools read any file on disk, so
+            // turn off everything that could reach the filesystem or network.
+            // Set via `-c` (not `--disable`) so unknown names in older or newer
+            // Codex versions are ignored instead of failing the run.
+            for feature in CODEX_DISABLED_FEATURES {
+                args.extend(["-c".into(), format!("features.{feature}=false")]);
+            }
+            args.extend(["-c".into(), "web_search=\"disabled\"".into()]);
             if !model.is_empty() {
                 args.extend(["-m".into(), model.into()]);
             }
@@ -190,7 +219,17 @@ pub async fn complete(profile: &LlmProfile, req: &ChatRequest, on_delta: DeltaFn
     let bin = shell_env::resolve_bin(Some(&profile.bin_path), profile.kind.default_bin())
         .ok_or_else(|| anyhow!("`{}` not found on PATH", profile.kind.default_bin()))?;
     let workdir = tempfile::tempdir()?;
-    let inv = build(profile, req, workdir.path());
+    let mut inv = build(profile, req, workdir.path());
+    // Gemini CLI saves every session under its home dir and has no switch to
+    // stop that, so give it a throwaway home holding only the sign-in state.
+    let gemini_home = if profile.kind == LlmKind::Gemini {
+        let home = tempfile::tempdir()?;
+        prepare_gemini_home(home.path())?;
+        inv.envs.push(("GEMINI_CLI_HOME".into(), home.path().to_string_lossy().into_owned()));
+        Some(home)
+    } else {
+        None
+    };
 
     let mut cmd = Command::new(&bin);
     cmd.args(&inv.args)
@@ -261,7 +300,35 @@ pub async fn complete(profile: &LlmProfile, req: &ChatRequest, on_delta: DeltaFn
     if text.trim().is_empty() {
         bail!("{} returned no output", profile.kind.default_bin());
     }
+    drop(gemini_home);
     Ok(text)
+}
+
+/// Copy just the sign-in files from `~/.gemini` into a fresh `<home>/.gemini`.
+/// Settings are reduced to the auth choice, so user MCP servers, extensions
+/// and hooks don't load either.
+fn prepare_gemini_home(home: &Path) -> Result<()> {
+    let dst = home.join(".gemini");
+    std::fs::create_dir_all(&dst)?;
+    let Some(src) = dirs::home_dir().map(|h| h.join(".gemini")) else { return Ok(()) };
+    for name in ["oauth_creds.json", "google_accounts.json", "installation_id", "user_id", ".env"] {
+        let from = src.join(name);
+        if from.is_file() {
+            std::fs::copy(&from, dst.join(name)).with_context(|| format!("copying {}", from.display()))?;
+        }
+    }
+    let settings: Value = std::fs::read_to_string(src.join("settings.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or(Value::Null);
+    let mut slim = serde_json::Map::new();
+    for key in ["security", "selectedAuthType"] {
+        if let Some(v) = settings.get(key) {
+            slim.insert(key.into(), v.clone());
+        }
+    }
+    std::fs::write(dst.join("settings.json"), serde_json::to_vec_pretty(&Value::Object(slim))?)?;
+    Ok(())
 }
 
 pub async fn version(bin: &Path) -> Option<String> {

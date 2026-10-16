@@ -4,6 +4,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, Result, anyhow, bail};
 use symphonia::core::audio::SampleBuffer;
@@ -37,20 +38,49 @@ pub fn ffmpeg_available() -> bool {
     shell_env::which("ffmpeg").is_some()
 }
 
-/// Decode any supported media file to 16 kHz mono samples.
-pub fn decode_file(path: &Path) -> Result<Vec<f32>> {
-    let e = ext(path).unwrap_or_default();
-    if SYMPHONIA_EXTS.contains(&e.as_str()) {
-        match decode_symphonia(path) {
-            Ok(pcm) if !pcm.is_empty() => return Ok(pcm),
-            Ok(_) => log::warn!("symphonia produced no audio for {}", path.display()),
-            Err(err) => log::warn!("symphonia failed for {}: {err:#}", path.display()),
-        }
+/// Longest media we decode. The whole file is held as 16 kHz f32 mono
+/// (~230 MB per hour), so anything longer is refused rather than risking memory.
+pub const MAX_DURATION_SECS: usize = 4 * 3600;
+const MAX_SAMPLES: usize = MAX_DURATION_SECS * SAMPLE_RATE as usize;
+/// Largest file a direct link may download.
+const MAX_DOWNLOAD_BYTES: u64 = 4 << 30;
+
+#[derive(Debug)]
+struct TooLong;
+
+impl std::fmt::Display for TooLong {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "This file is longer than {} hours, which Hush can't transcribe yet", MAX_DURATION_SECS / 3600)
     }
-    decode_ffmpeg(path)
 }
 
-fn decode_symphonia(path: &Path) -> Result<Vec<f32>> {
+impl std::error::Error for TooLong {}
+
+fn check_cancel(cancel: &AtomicBool) -> Result<()> {
+    if cancel.load(Ordering::Relaxed) { Err(anyhow!("Cancelled")) } else { Ok(()) }
+}
+
+/// Decode any supported media file to 16 kHz mono samples. `cancel` is polled
+/// while decoding so a cancelled job stops promptly (and stops ffmpeg).
+pub fn decode_file(path: &Path, cancel: &AtomicBool) -> Result<Vec<f32>> {
+    let e = ext(path).unwrap_or_default();
+    if SYMPHONIA_EXTS.contains(&e.as_str()) {
+        match decode_symphonia(path, cancel) {
+            Ok(pcm) if !pcm.is_empty() => return Ok(pcm),
+            Ok(_) => log::warn!("symphonia produced no audio for {}", path.display()),
+            Err(err) => {
+                check_cancel(cancel)?;
+                if err.is::<TooLong>() {
+                    return Err(err);
+                }
+                log::warn!("symphonia failed for {}: {err:#}", path.display())
+            }
+        }
+    }
+    decode_ffmpeg(path, cancel)
+}
+
+fn decode_symphonia(path: &Path, cancel: &AtomicBool) -> Result<Vec<f32>> {
     let file = std::fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
     let mut hint = Hint::new();
@@ -69,9 +99,12 @@ fn decode_symphonia(path: &Path) -> Result<Vec<f32>> {
     let rate = track.codec_params.sample_rate.ok_or_else(|| anyhow!("unknown sample rate"))?;
     let mut decoder = symphonia::default::get_codecs().make(&track.codec_params, &DecoderOptions::default())?;
 
-    let mut mono: Vec<f32> = Vec::new();
+    // Resample as we go so the native-rate audio is never held in full.
+    let mut resampler = super::Resampler::new(rate);
+    let mut out: Vec<f32> = Vec::new();
     let mut buf: Option<SampleBuffer<f32>> = None;
     loop {
+        check_cancel(cancel)?;
         let packet = match format.next_packet() {
             Ok(p) => p,
             Err(symphonia::core::errors::Error::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
@@ -93,27 +126,76 @@ fn decode_symphonia(path: &Path) -> Result<Vec<f32>> {
             *sb = SampleBuffer::new(decoded.capacity() as u64, spec);
         }
         sb.copy_interleaved_ref(decoded);
-        mono.extend(super::to_mono(sb.samples(), channels));
+        out.extend(resampler.process(&super::to_mono(sb.samples(), channels)));
+        if out.len() > MAX_SAMPLES {
+            bail!(TooLong);
+        }
     }
-    Ok(super::resample(&mono, rate))
+    out.extend(resampler.finish());
+    Ok(out)
 }
 
-fn decode_ffmpeg(path: &Path) -> Result<Vec<f32>> {
+/// Kills the child process on drop unless it already exited.
+struct KillOnDrop(std::process::Child);
+
+impl Drop for KillOnDrop {
+    fn drop(&mut self) {
+        if matches!(self.0.try_wait(), Ok(None)) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+}
+
+fn decode_ffmpeg(path: &Path, cancel: &AtomicBool) -> Result<Vec<f32>> {
+    use std::io::Read;
     let ffmpeg = shell_env::which("ffmpeg")
         .ok_or_else(|| anyhow!("This format needs ffmpeg. Install it with `brew install ffmpeg`."))?;
-    let out = std::process::Command::new(ffmpeg)
+    let child = std::process::Command::new(ffmpeg)
         .args(["-nostdin", "-hide_banner", "-loglevel", "error", "-i"])
         .arg(path)
         .args(["-vn", "-f", "f32le", "-acodec", "pcm_f32le", "-ac", "1", "-ar"])
         .arg(SAMPLE_RATE.to_string())
         .arg("-")
         .stdin(Stdio::null())
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .context("running ffmpeg")?;
-    if !out.status.success() {
-        bail!("ffmpeg failed: {}", String::from_utf8_lossy(&out.stderr).trim());
+    let mut child = KillOnDrop(child);
+    // Drain stderr on its own thread so a chatty ffmpeg can't block on a full pipe.
+    let mut stderr = child.0.stderr.take().expect("piped stderr");
+    let stderr = std::thread::spawn(move || {
+        let mut s = String::new();
+        let _ = stderr.read_to_string(&mut s);
+        s
+    });
+    let mut stdout = child.0.stdout.take().expect("piped stdout");
+    let mut out: Vec<f32> = Vec::new();
+    let mut buf = vec![0u8; 1 << 16];
+    let mut carry: Vec<u8> = Vec::with_capacity(4);
+    loop {
+        check_cancel(cancel)?;
+        let n = match stdout.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e).context("reading ffmpeg output"),
+        };
+        carry.extend_from_slice(&buf[..n]);
+        let (whole, rest) = carry.as_chunks::<4>();
+        out.extend(whole.iter().map(|b| f32::from_le_bytes(*b)));
+        carry = rest.to_vec();
+        if out.len() > MAX_SAMPLES {
+            bail!(TooLong);
+        }
     }
-    Ok(out.stdout.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect())
+    let status = child.0.wait().context("waiting for ffmpeg")?;
+    if !status.success() {
+        let err = stderr.join().unwrap_or_default();
+        bail!("ffmpeg failed: {}", err.trim());
+    }
+    Ok(out)
 }
 
 pub struct Downloaded {
@@ -150,10 +232,24 @@ pub async fn download_url(url: &str, dest_dir: &Path) -> Result<Downloaded> {
     let lower = url.to_lowercase();
     let path_part = lower.split(['?', '#']).next().unwrap_or("");
     if let Some(e) = MEDIA_EXTS.iter().find(|e| path_part.ends_with(&format!(".{e}"))) {
-        let resp = reqwest::get(url).await?.error_for_status()?;
+        use tokio::io::AsyncWriteExt;
+        let mut resp = reqwest::get(url).await?.error_for_status()?;
+        if resp.content_length().is_some_and(|n| n > MAX_DOWNLOAD_BYTES) {
+            bail!("This file is too large to download (over {} GB)", MAX_DOWNLOAD_BYTES >> 30);
+        }
         let name = path_part.rsplit('/').next().unwrap_or("download").to_string();
         let dest = dest_dir.join(format!("{}.{e}", partial.stem));
-        tokio::fs::write(&dest, resp.bytes().await?).await?;
+        // Stream to disk rather than buffering the whole body in memory.
+        let mut file = tokio::fs::File::create(&dest).await?;
+        let mut written = 0u64;
+        while let Some(chunk) = resp.chunk().await? {
+            written += chunk.len() as u64;
+            if written > MAX_DOWNLOAD_BYTES {
+                bail!("This file is too large to download (over {} GB)", MAX_DOWNLOAD_BYTES >> 30);
+            }
+            file.write_all(&chunk).await?;
+        }
+        file.flush().await?;
         partial.armed = false;
         return Ok(Downloaded { path: dest, title: name });
     }
@@ -165,6 +261,8 @@ pub async fn download_url(url: &str, dest_dir: &Path) -> Result<Downloaded> {
         .args([
             "--no-playlist",
             "--no-progress",
+            "--max-filesize",
+            "4G",
             "-f",
             "bestaudio/best",
             "--print",

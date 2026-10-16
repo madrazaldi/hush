@@ -11,7 +11,7 @@ async fn main() -> anyhow::Result<()> {
     let model = args.next().unwrap_or_else(|| "parakeet-tdt-0.6b-v3".into());
 
     let t = Instant::now();
-    let pcm = audio::decode::decode_file(std::path::Path::new(&file))?;
+    let pcm = audio::decode::decode_file(std::path::Path::new(&file), &Default::default())?;
     println!("decoded {:.1}s of audio in {:?}", pcm.len() as f64 / stt::SAMPLE_RATE as f64, t.elapsed());
 
     let t = Instant::now();

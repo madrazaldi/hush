@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Result, anyhow};
 use parking_lot::Mutex;
@@ -152,6 +154,14 @@ fn new_recording(title: String, source: String, media_path: Option<String>) -> R
     }
 }
 
+struct SetOnDrop(Arc<AtomicBool>);
+
+impl Drop for SetOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
+
 async fn run_job(id: &str) -> Result<()> {
     let st = state::get();
     let s = st.settings();
@@ -177,7 +187,10 @@ async fn run_job(id: &str) -> Result<()> {
     st.db.set_status(id, "processing", 0.0, None)?;
     emit(id, "processing", "decoding", 0.0, None);
     let media = PathBuf::from(rec.media_path.clone().unwrap_or_default());
-    let pcm = tokio::task::spawn_blocking(move || audio::decode::decode_file(&media)).await??;
+    // Dropping this future (job cancelled) sets the flag, which stops the decoder.
+    let cancel = Arc::new(AtomicBool::new(false));
+    let _stop_decode = SetOnDrop(cancel.clone());
+    let pcm = tokio::task::spawn_blocking(move || audio::decode::decode_file(&media, &cancel)).await??;
     if pcm.is_empty() {
         return Err(anyhow!("No audio found in this file"));
     }

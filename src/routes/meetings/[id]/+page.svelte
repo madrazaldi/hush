@@ -71,6 +71,9 @@
     id;
     loaded = false;
     rec = null;
+    enhancing = false;
+    editingEnhanced = false;
+    enhancedDraft = "";
     load(true);
     // Save pending edits to the meeting they were typed in before switching away.
     return flushNotes;
@@ -87,7 +90,7 @@
           enhancing = true;
           rec.enhanced = "";
           view = "enhanced";
-        } else if (e.delta) rec.enhanced += e.delta;
+        } else if (e.delta && enhancing) rec.enhanced += e.delta;
         else if (e.done) {
           enhancing = false;
           load();
@@ -122,8 +125,9 @@
   }
 
   async function patch(p: RecordingPatch) {
-    const r = await api.updateRecording(id, p);
-    if (r) {
+    const forId = id;
+    const r = await api.updateRecording(forId, p);
+    if (r && forId === id) {
       r.notes = notes;
       rec = r;
     }
@@ -159,17 +163,20 @@
 
   async function enhance(templateId?: string) {
     if (!rec) return;
+    const forId = id;
     await saveNotesNow();
     enhancing = true;
     view = "enhanced";
     rec.enhanced = "";
     try {
-      await api.meetingEnhance(id, templateId ?? rec.template_id ?? s.meetings.default_template);
+      await api.meetingEnhance(forId, templateId ?? rec.template_id ?? s.meetings.default_template);
     } catch (e) {
-      app.toast("error", errorText(e));
+      if (forId === id) app.toast("error", errorText(e));
     } finally {
-      enhancing = false;
-      load();
+      if (forId === id) {
+        enhancing = false;
+        load();
+      }
     }
   }
 

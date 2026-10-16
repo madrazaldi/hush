@@ -47,6 +47,8 @@ pub fn apply_dock_visibility(app: &AppHandle, show: bool) {
     let _ = (app, show);
 }
 
+static EXITING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info,hush_lib=debug")).init();
@@ -182,7 +184,20 @@ pub fn run() {
             if let RunEvent::Reopen { .. } = event {
                 show_main(app, None);
             }
+            // Quitting mid-meeting: finish the recording properly first, then exit.
+            if let RunEvent::ExitRequested { api, code, .. } = &event
+                && state::get().meetings.active_id().is_some()
+                && !EXITING.swap(true, std::sync::atomic::Ordering::SeqCst)
+            {
+                api.prevent_exit();
+                let (app, code) = (app.clone(), code.unwrap_or(0));
+                tauri::async_runtime::spawn(async move {
+                    state::get().meetings.shutdown().await;
+                    app.exit(code);
+                });
+            }
             if let RunEvent::Exit = event {
+                state::get().dictation.cancel();
                 stt::local::shutdown();
             }
             let _ = (app, &event);

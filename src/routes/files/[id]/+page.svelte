@@ -40,7 +40,9 @@
   let panel = $state<"summary" | "chat">("summary");
   let more = $state(false);
 
-  let summarizing = $state(false);
+  // The recording a summary is being generated for, if any.
+  let summarizingFor = $state<string | null>(null);
+  const summarizing = $derived(summarizingFor === id);
   let summaryDraft = $state("");
   let editingSummary = $state(false);
   let summaryReq = "";
@@ -65,6 +67,9 @@
     loaded = false;
     job = null;
     query = "";
+    // Drafts belong to the recording they were opened on.
+    editingSummary = false;
+    summaryDraft = "";
     load();
   });
 
@@ -73,7 +78,12 @@
     const off2 = on<JobProgress>("recording:progress", (p) => {
       if (p.id !== id) return;
       job = p;
-      if (rec) rec.status = p.status;
+      if (rec) {
+        rec.status = p.status;
+        if (p.error) rec.error = p.error;
+      }
+      // Finished or failed: pick up the transcript or error from the database.
+      if (p.status === "ready" || p.status === "error") load();
     });
     return () => {
       off1();
@@ -88,24 +98,34 @@
   );
 
   async function patch(p: RecordingPatch) {
-    const r = await api.updateRecording(id, p);
-    if (r) rec = r;
+    const forId = id;
+    const r = await api.updateRecording(forId, p);
+    if (r && forId === id) rec = r;
   }
 
   async function summarize() {
     if (!rec) return;
-    summarizing = true;
+    // Results only touch the page while it still shows this recording.
+    const forId = id;
+    const here = () => forId === id && rec?.id === forId;
+    summarizingFor = forId;
     rec.summary = "";
     panel = "summary";
     try {
-      const { requestId, result } = await streamLlm((r) => api.summarize(id, r), (d) => rec && (rec.summary += d));
+      const { requestId, result } = await streamLlm(
+        (r) => api.summarize(forId, r),
+        (d) => here() && (rec!.summary += d),
+      );
       summaryReq = requestId;
-      rec.summary = await result;
+      const summary = await result;
+      if (here()) rec!.summary = summary;
     } catch (e) {
-      app.toast("error", errorText(e));
-      load();
+      if (forId === id) {
+        app.toast("error", errorText(e));
+        load();
+      }
     } finally {
-      summarizing = false;
+      if (summarizingFor === forId) summarizingFor = null;
     }
   }
 

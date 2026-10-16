@@ -94,6 +94,7 @@ export interface MeetingSettings {
   capture_system_audio: boolean;
   keep_audio: boolean;
   auto_enhance: boolean;
+  auto_enhance_confirmed: boolean;
   llm_profile: string;
   default_template: string;
   templates: NoteTemplate[];

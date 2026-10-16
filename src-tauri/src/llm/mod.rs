@@ -114,6 +114,9 @@ impl ChatRequest {
     }
 }
 
+/// Upper bound on any single completion, so nothing that awaits one can hang.
+const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
 pub type DeltaFn<'a> = &'a mut (dyn FnMut(&str) + Send);
 
 /// Run a completion, streaming text deltas to `on_delta`. Returns the full text.
@@ -134,7 +137,10 @@ pub async fn complete(
         }
     };
     tokio::select! {
-        r = fut => r.map(|s| s.trim().to_string()),
+        r = tokio::time::timeout(TIMEOUT, fut) => match r {
+            Ok(r) => r.map(|s| s.trim().to_string()),
+            Err(_) => anyhow::bail!("{} took too long to respond", profile.name),
+        },
         _ = cancel.cancelled() => anyhow::bail!("cancelled"),
     }
 }

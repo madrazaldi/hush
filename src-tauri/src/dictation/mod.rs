@@ -60,6 +60,14 @@ struct Recording {
 
 enum Phase {
     Idle,
+    /// The mic is being opened for `session`. Reserved under the lock so two
+    /// starts (hotkey + UI) can't both open a device.
+    Starting {
+        session: u64,
+        mode: Mode,
+        /// The hotkey was released before recording began.
+        released: bool,
+    },
     Recording(Box<Recording>),
     /// Transcribing/inserting the recording from `session`.
     Processing {
@@ -169,6 +177,7 @@ impl Dictation {
                             self.finish();
                         }
                     }
+                    (Phase::Starting { mode: m, released, .. }, false) if *m == mode => *released = true,
                     (Phase::Recording(rec), false) => {
                         if rec.latched || (rec.mode != mode && rec.mode == Mode::Dictate) {
                             return;
@@ -199,6 +208,16 @@ impl Dictation {
 
     /// Start recording (also used by the UI's record button).
     pub fn start(&self, mode: Mode) {
+        let session = {
+            let mut phase = self.phase.lock();
+            if !matches!(*phase, Phase::Idle) {
+                return;
+            }
+            let mut n = self.session.lock();
+            *n += 1;
+            *phase = Phase::Starting { session: *n, mode, released: false };
+            *n
+        };
         let st = state::get();
         let s = st.settings();
         let front = platform::front_app();
@@ -220,9 +239,17 @@ impl Dictation {
                 }
             }),
         );
-        let mic = match mic {
+
+        let mut phase = self.phase.lock();
+        let Phase::Starting { session: current, released, .. } = *phase else { return };
+        if current != session {
+            // Cancelled while the mic was opening; `mic` is dropped (stopped) here.
+            return;
+        }
+        let mut mic = match mic {
             Ok(m) => m,
             Err(e) => {
+                *phase = Phase::Idle;
                 log::error!("mic: {e:#}");
                 if s.dictation.sounds {
                     platform::play(Sound::Error);
@@ -233,21 +260,24 @@ impl Dictation {
                 return;
             }
         };
+        // Push-to-talk released before the mic was even open: nothing to record.
+        if released && s.dictation.activation == Activation::PushToTalk {
+            *phase = Phase::Idle;
+            mic.stop();
+            return;
+        }
+        // In hybrid mode an early release is a quick tap, which latches.
+        let latched = released && s.dictation.activation == Activation::Hybrid;
 
         let restore_mute = if s.dictation.mute_system_audio { platform::set_output_muted(true) } else { None };
         if s.dictation.sounds {
             platform::play(Sound::Start);
         }
-        let session = {
-            let mut n = self.session.lock();
-            *n += 1;
-            *n
-        };
         let style = pick_style(&s, &front).map(|st| st.name.clone());
-        *self.phase.lock() = Phase::Recording(Box::new(Recording {
+        *phase = Phase::Recording(Box::new(Recording {
             mode,
             started: Instant::now(),
-            latched: false,
+            latched,
             front: front.clone(),
             mic,
             pcm,
@@ -259,11 +289,12 @@ impl Dictation {
         overlay_emit(
             "recording",
             mode,
-            false,
+            latched,
             None,
             if mode == Mode::Dictate { style } else { None },
             Some(front.name),
         );
+        drop(phase);
 
         // Safety stop for forgotten latched recordings.
         std::thread::spawn(move || {
@@ -279,18 +310,16 @@ impl Dictation {
     /// Toggle from the UI (tray / button).
     pub fn toggle(&self) {
         let recording = matches!(*self.phase.lock(), Phase::Recording(_));
-        if recording {
-            self.finish()
-        } else if !self.is_busy() {
-            self.start(Mode::Dictate)
-        }
+        if recording { self.finish() } else { self.start(Mode::Dictate) }
     }
 
+    /// Every phase change and its UI effects happen under the phase lock, so a
+    /// stale session can never touch the overlay or devices of a newer one.
     pub fn cancel(&self) {
         let st = state::get();
         let s = st.settings();
-        let prev = std::mem::replace(&mut *self.phase.lock(), Phase::Idle);
-        match prev {
+        let mut phase = self.phase.lock();
+        match std::mem::replace(&mut *phase, Phase::Idle) {
             Phase::Recording(mut rec) => {
                 rec.mic.stop();
                 if let Some(m) = rec.restore_mute {
@@ -301,6 +330,8 @@ impl Dictation {
                 }
             }
             Phase::Processing { token, .. } => token.cancel(),
+            // `start` sees the change and releases the mic itself.
+            Phase::Starting { .. } => {}
             Phase::Idle => return,
         }
         self.set_cancel(false);
@@ -319,7 +350,6 @@ impl Dictation {
         else {
             unreachable!()
         };
-        drop(phase);
         rec.mic.stop();
         let st = state::get();
         let s = st.settings();
@@ -333,6 +363,7 @@ impl Dictation {
         let mode = rec.mode;
         let front = rec.front.clone();
         overlay_emit("processing", mode, false, None, None, Some(front.name.clone()));
+        drop(phase);
 
         tauri::async_runtime::spawn(async move {
             let result = tokio::select! {
@@ -341,11 +372,15 @@ impl Dictation {
             };
             let d = &state::get().dictation;
             let st = state::get();
-            // Once cancelled, `cancel()` has already reset the UI and a newer
-            // session may own the overlay and controller: touch nothing.
-            if token.is_cancelled() {
+            let mut phase = d.phase.lock();
+            // If cancelled, `cancel()` already reset the UI and a newer session
+            // may own the overlay and controller: touch nothing.
+            let current = matches!(*phase, Phase::Processing { session: s, .. } if s == session);
+            if !current || token.is_cancelled() {
                 return;
             }
+            *phase = Phase::Idle;
+            d.set_cancel(false);
             match result {
                 Ok(Some(text)) => {
                     overlay_emit("done", mode, false, Some(text.chars().take(80).collect()), None, None);
@@ -363,12 +398,6 @@ impl Dictation {
                     overlay_emit("error", mode, false, Some(short_error(&e)), None, None);
                     hide_later(2600);
                 }
-            }
-            let mut phase = d.phase.lock();
-            if matches!(*phase, Phase::Processing { session: s, .. } if s == session) {
-                *phase = Phase::Idle;
-                drop(phase);
-                d.set_cancel(false);
             }
         });
     }
@@ -517,7 +546,7 @@ fn insert_text(text: &str, s: &Settings, cancelled: &dyn Fn() -> bool) -> Result
         return Ok(());
     }
     match s.dictation.paste_method {
-        PasteMethod::Paste => platform::paste_text(text, s.dictation.restore_clipboard)?,
+        PasteMethod::Paste => platform::paste_text(text, s.dictation.restore_clipboard, cancelled)?,
         PasteMethod::Type => platform::type_text(text, cancelled)?,
         PasteMethod::CopyOnly => {
             platform::copy_text(text)?;
@@ -527,16 +556,13 @@ fn insert_text(text: &str, s: &Settings, cancelled: &dyn Fn() -> bool) -> Result
     if cancelled() {
         return Ok(());
     }
-    match s.dictation.auto_submit {
-        AutoSubmit::Off => {}
-        AutoSubmit::Enter => {
-            std::thread::sleep(Duration::from_millis(60));
-            platform::press_enter(false)?;
-        }
-        AutoSubmit::CmdEnter => {
-            std::thread::sleep(Duration::from_millis(60));
-            platform::press_enter(true)?;
-        }
+    if s.dictation.auto_submit == AutoSubmit::Off {
+        return Ok(());
     }
-    Ok(())
+    std::thread::sleep(Duration::from_millis(60));
+    // Re-checked right before the key: Escape during the pause must not submit.
+    if cancelled() {
+        return Ok(());
+    }
+    platform::press_enter(s.dictation.auto_submit == AutoSubmit::CmdEnter)
 }

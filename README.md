@@ -59,7 +59,7 @@ Dictation, Files and Meetings each choose their own engine.
 AI is used for dictation polish, command mode, meeting notes, summaries, translation, chat and recipes.
 
 - **Agent CLIs** you're already signed in to: Claude Code, Codex, opencode, Gemini CLI, Antigravity.
-  - They run with tools disabled or read-only, in an empty temporary directory, and without saving session history.
+  - They run with tools disabled or read-only, in an empty temporary directory. Claude Code, Codex and Gemini CLI keep no session history; opencode and Antigravity may keep their own.
 - **Bring your own key**: any Chat Completions, Responses or Anthropic Messages endpoint.
   - Presets: OpenAI, Anthropic, OpenRouter, Groq, xAI, Ollama, LM Studio.
 

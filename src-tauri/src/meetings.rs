@@ -2,6 +2,7 @@
 //! transcribe them live in short VAD-cut chunks, then turn the user's notes +
 //! transcript into enhanced notes (Granola-style).
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -29,6 +30,9 @@ const MAX_UTTERANCE: usize = SAMPLE_RATE as usize * 25;
 /// Speech waiting for transcription is kept in memory up to ~5 minutes; past
 /// that (slow provider, busy local model) further chunks are spooled to disk.
 const MAX_QUEUED_SAMPLES: usize = SAMPLE_RATE as usize * 300;
+/// If spooling fails too (disk full), speech beyond this backlog is skipped
+/// rather than growing memory without bound. The recording itself is unaffected.
+const HARD_MAX_QUEUED_SAMPLES: usize = MAX_QUEUED_SAMPLES * 2;
 
 enum Pcm {
     Mem(Vec<f32>),
@@ -45,19 +49,37 @@ struct Chunk {
 /// Sending side of the transcription queue, shared by both streams.
 #[derive(Clone)]
 struct ChunkQueue {
+    id: String,
     tx: mpsc::UnboundedSender<Chunk>,
     queued: Arc<AtomicUsize>,
+    /// Session-owned temp dir (not the recording dir), removed when the
+    /// session ends and swept on launch, so raw speech never lingers there.
     spool_dir: PathBuf,
     seq: Arc<AtomicUsize>,
+    warned: Arc<AtomicBool>,
 }
 
 impl ChunkQueue {
     fn send(&self, speaker: &'static str, start_ms: i64, pcm: Vec<f32>) {
         let len = pcm.len();
-        let pcm = if self.queued.load(Ordering::Relaxed) + len > MAX_QUEUED_SAMPLES {
+        let queued = self.queued.load(Ordering::Relaxed);
+        let pcm = if queued + len > MAX_QUEUED_SAMPLES {
             let path = self.spool_dir.join(format!("pending-{}.wav", self.seq.fetch_add(1, Ordering::Relaxed)));
-            match crate::audio::write_wav(&path, &pcm, SAMPLE_RATE) {
+            let spooled = std::fs::create_dir_all(&self.spool_dir)
+                .map_err(anyhow::Error::from)
+                .and_then(|_| crate::audio::write_wav(&path, &pcm, SAMPLE_RATE));
+            match spooled {
                 Ok(()) => Pcm::Spooled(path),
+                Err(e) if queued + len > HARD_MAX_QUEUED_SAMPLES => {
+                    log::error!("transcription backlog full and spooling failed, skipping speech: {e:#}");
+                    if !self.warned.swap(true, Ordering::Relaxed) {
+                        state::get().emit(
+                            "meeting:error",
+                            serde_json::json!({"id": self.id, "error": "Transcription fell behind and some speech was skipped"}),
+                        );
+                    }
+                    return;
+                }
                 Err(e) => {
                     log::warn!("spooling meeting audio failed: {e:#}");
                     self.queued.fetch_add(len, Ordering::Relaxed);
@@ -106,7 +128,8 @@ struct Segmenter {
     in_speech: bool,
     silence: usize,
     noise: f32,
-    queue: ChunkQueue,
+    /// Dropped by `finish`, which is what ends the transcription worker.
+    queue: Option<ChunkQueue>,
     wav: Option<WavSink>,
     level: f32,
 }
@@ -124,7 +147,7 @@ impl Segmenter {
             in_speech: false,
             silence: 0,
             noise: 0.003,
-            queue,
+            queue: Some(queue),
             wav,
             level: 0.0,
         }
@@ -189,13 +212,16 @@ impl Segmenter {
     fn emit(&mut self) {
         let pcm = std::mem::take(&mut self.buf);
         let start_ms = self.offset_ms + (self.buf_start as i64) * 1000 / SAMPLE_RATE as i64;
-        self.queue.send(self.speaker, start_ms, pcm);
+        if let Some(q) = &self.queue {
+            q.send(self.speaker, start_ms, pcm);
+        }
     }
 
     fn finish(&mut self) -> Option<WavSink> {
         if self.in_speech && self.buf.len() >= SAMPLE_RATE as usize / 2 {
             self.emit();
         }
+        self.queue = None;
         self.wav.take()
     }
 
@@ -220,19 +246,31 @@ struct Levels {
     them: f32,
 }
 
+/// Queue and WAV path waiting for the first system audio (see `Active::them_init`).
+type ThemInit = Arc<Mutex<Option<(ChunkQueue, Option<PathBuf>)>>>;
+
+#[cfg(target_os = "macos")]
+type SystemSlot = Arc<Mutex<Option<crate::audio::system_macos::SystemAudioCapture>>>;
+
 struct Active {
     id: String,
     started: Instant,
     paused: Arc<AtomicBool>,
     mic: Option<MicCapture>,
     #[cfg(target_os = "macos")]
-    system: Arc<Mutex<Option<crate::audio::system_macos::SystemAudioCapture>>>,
+    system: SystemSlot,
     stopping: Arc<AtomicBool>,
     me: Arc<Mutex<Segmenter>>,
     them: Arc<Mutex<Option<Segmenter>>>,
+    /// Queue and WAV path for the "Them" segmenter, which is created on the
+    /// first system audio so its offset reflects when capture really began.
+    them_init: ThemInit,
     worker: tauri::async_runtime::JoinHandle<()>,
     system_error: Arc<Mutex<Option<String>>>,
     dir: PathBuf,
+    spool_dir: PathBuf,
+    me_wav: Option<PathBuf>,
+    them_wav: Option<PathBuf>,
 }
 
 #[derive(Default)]
@@ -240,6 +278,9 @@ pub struct Meetings {
     active: Mutex<Option<Active>>,
     /// Held while `start` sets up devices, so two concurrent starts can't both proceed.
     starting: AtomicBool,
+    /// Meetings that were stopped but are still transcribing / mixing. They
+    /// can't be resumed until that finishes.
+    finalizing: Mutex<HashSet<String>>,
     detected: Mutex<Vec<String>>,
 }
 
@@ -248,6 +289,14 @@ struct ClearOnDrop<'a>(&'a AtomicBool);
 impl Drop for ClearOnDrop<'_> {
     fn drop(&mut self) {
         self.0.store(false, Ordering::SeqCst);
+    }
+}
+
+struct Finalizing<'a>(&'a Mutex<HashSet<String>>, String);
+
+impl Drop for Finalizing<'_> {
+    fn drop(&mut self) {
+        self.0.lock().remove(&self.1);
     }
 }
 
@@ -287,6 +336,11 @@ impl Meetings {
         let _starting = ClearOnDrop(&self.starting);
         if self.active.lock().is_some() {
             return Err(anyhow!("A meeting is already being recorded"));
+        }
+        if let Some(id) = &existing
+            && self.finalizing.lock().contains(id)
+        {
+            return Err(anyhow!("This meeting is still being processed. Try again in a moment."));
         }
         let st = state::get();
         let s = st.settings();
@@ -334,18 +388,29 @@ impl Meetings {
 
         let dir = crate::paths::audio_dir().join(&rec.id);
         std::fs::create_dir_all(&dir).map_err(|e| rollback(e.into()))?;
-        let part = db::now_ms();
+        // Each session's files are unique, so a resumed meeting never touches
+        // the previous session's.
+        let part = format!("{}-{}", db::now_ms(), &uuid::Uuid::new_v4().simple().to_string()[..8]);
         let keep = s.meetings.keep_audio;
-        let sink = |name: &str| {
-            if keep { WavSink::create(&dir.join(format!("{name}-{part}.wav")), SAMPLE_RATE, 1).ok() } else { None }
-        };
+        let wav_path = |name: &str| keep.then(|| dir.join(format!("{name}-{part}.wav")));
+        let (me_wav, them_wav) = (wav_path("me"), wav_path("them"));
+        let spool_dir = crate::paths::spool_dir().join(&part);
 
         let (tx, rx) = mpsc::unbounded_channel::<Chunk>();
-        let queue = ChunkQueue { tx, queued: Arc::default(), spool_dir: dir.clone(), seq: Arc::default() };
+        let queue = ChunkQueue {
+            id: rec.id.clone(),
+            tx,
+            queued: Arc::default(),
+            spool_dir: spool_dir.clone(),
+            seq: Arc::default(),
+            warned: Arc::default(),
+        };
         let queued = queue.queued.clone();
         let paused = Arc::new(AtomicBool::new(false));
-        let me = Arc::new(Mutex::new(Segmenter::new(ME, base_ms, queue.clone(), sink("me"))));
+        let me_sink = me_wav.as_ref().and_then(|p| WavSink::create(p, SAMPLE_RATE, 1).ok());
+        let me = Arc::new(Mutex::new(Segmenter::new(ME, base_ms, queue.clone(), me_sink)));
         let them: Arc<Mutex<Option<Segmenter>>> = Arc::new(Mutex::new(None));
+        let them_init: ThemInit = Arc::new(Mutex::new(None));
 
         let started = Instant::now();
         let me2 = me.clone();
@@ -363,44 +428,19 @@ impl Meetings {
         let system_error = Arc::new(Mutex::new(None));
         let stopping = Arc::new(AtomicBool::new(false));
         #[cfg(target_os = "macos")]
-        let system = Arc::new(Mutex::new(None));
+        let system: SystemSlot = Arc::new(Mutex::new(None));
         #[cfg(target_os = "macos")]
         if s.meetings.capture_system_audio {
             if crate::audio::system_macos::is_supported() {
-                // Starting the tap can block on the permission prompt, so do it off-thread.
-                let (them2, paused3, system2, err2, stopping2, queue2) = (
-                    them.clone(),
-                    paused.clone(),
-                    system.clone(),
-                    system_error.clone(),
-                    stopping.clone(),
-                    queue.clone(),
-                );
-                let wav = sink("them");
-                std::thread::spawn(move || {
-                    let offset = base_ms + started.elapsed().as_millis() as i64;
-                    *them2.lock() = Some(Segmenter::new(THEM, offset, queue2, wav));
-                    let them3 = them2.clone();
-                    let res = crate::audio::system_macos::SystemAudioCapture::start(Box::new(move |pcm| {
-                        if !paused3.load(Ordering::Relaxed)
-                            && let Some(seg) = them3.lock().as_mut()
-                        {
-                            seg.push(pcm);
-                        }
-                    }));
-                    match res {
-                        Ok(mut cap) => {
-                            if stopping2.load(Ordering::Relaxed) {
-                                cap.stop();
-                            } else {
-                                *system2.lock() = Some(cap);
-                            }
-                        }
-                        Err(e) => {
-                            log::error!("system audio: {e:#}");
-                            *err2.lock() = Some(format!("{e}"));
-                        }
-                    }
+                *them_init.lock() = Some((queue.clone(), them_wav.clone()));
+                start_system_capture(SystemStart {
+                    me: me.clone(),
+                    them: them.clone(),
+                    them_init: them_init.clone(),
+                    paused: paused.clone(),
+                    system: system.clone(),
+                    error: system_error.clone(),
+                    stopping: stopping.clone(),
                 });
             } else {
                 *system_error.lock() = Some("System audio capture needs macOS 14.2 or later".into());
@@ -409,15 +449,10 @@ impl Meetings {
         drop(queue);
 
         let worker = tauri::async_runtime::spawn(transcribe_worker(rec.id.clone(), rx, queued));
-        let levels_me = me.clone();
-        let levels_them = them.clone();
-        let id = rec.id.clone();
+        let (levels_me, levels_them, levels_stop) = (me.clone(), them.clone(), stopping.clone());
         tauri::async_runtime::spawn(async move {
-            loop {
+            while !levels_stop.load(Ordering::Relaxed) {
                 tokio::time::sleep(Duration::from_millis(100)).await;
-                if state::get().meetings.active_id().as_deref() != Some(&id) {
-                    break;
-                }
                 let me = levels_me.lock().level;
                 let them = levels_them.lock().as_ref().map(|s| s.level).unwrap_or(0.0);
                 state::get().emit("meeting:levels", Levels { me, them });
@@ -434,9 +469,13 @@ impl Meetings {
             stopping,
             me,
             them,
+            them_init,
             worker,
             system_error,
             dir,
+            spool_dir,
+            me_wav,
+            them_wav,
         });
         st.emit("meeting:started", &rec.id);
         crate::tray::refresh();
@@ -445,12 +484,35 @@ impl Meetings {
 
     /// Stop recording, finish transcription, and (optionally) enhance notes.
     pub async fn stop(&self) -> Result<String> {
-        let mut a = self.active.lock().take().ok_or_else(|| anyhow!("No meeting is being recorded"))?;
+        self.finish(false).await
+    }
+
+    /// Called when the app quits: finalize the recording's audio and give
+    /// transcription a few seconds to catch up, but don't start AI work.
+    pub async fn shutdown(&self) {
+        if self.active_id().is_some()
+            && let Err(e) = self.finish(true).await
+        {
+            log::error!("finishing meeting on quit: {e:#}");
+        }
+    }
+
+    async fn finish(&self, quitting: bool) -> Result<String> {
+        let (mut a, _finalizing) = {
+            let mut active = self.active.lock();
+            let a = active.take().ok_or_else(|| anyhow!("No meeting is being recorded"))?;
+            self.finalizing.lock().insert(a.id.clone());
+            let guard = Finalizing(&self.finalizing, a.id.clone());
+            (a, guard)
+        };
         // Wall-clock fallback, taken before waiting on devices and transcription.
         let wall_ms = a.started.elapsed().as_millis() as i64;
         let st = state::get();
         let id = a.id.clone();
-        a.stopping.store(true, Ordering::Relaxed);
+        // Set before taking the system slot / "Them" segmenter: the system
+        // capture thread checks it under those locks, so it can't install
+        // anything after we've drained them.
+        a.stopping.store(true, Ordering::SeqCst);
         st.db.set_status(&id, "processing", 0.0, None)?;
         st.emit("meeting:stopped", &id);
         crate::tray::refresh();
@@ -465,49 +527,63 @@ impl Meetings {
                 tokio::task::spawn_blocking(move || c.stop()).await.ok();
             }
         }
-        // Flushing the segmenters drops the last senders and ends the worker.
+        // Flushing the segmenters drops the last queue senders, which ends the worker.
         let (me_wav, me_dur, me_base) = {
             let mut me = a.me.lock();
             (me.finish(), me.duration_ms(), me.offset_ms)
         };
+        a.them_init.lock().take();
         let them_seg = a.them.lock().take();
         let (them_wav, them_dur, them_offset) = match them_seg {
             Some(mut s) => (s.finish(), s.duration_ms(), s.offset_ms),
             None => (None, 0, me_base),
         };
-        drop(a.me);
-        let _ = a.worker.await;
 
+        // Finalize the audio first, so it survives even if transcription is cut short.
         // The captured timeline (sample counts) excludes pauses and matches the
         // segment timestamps; fall back to wall time only if nothing was captured.
         let captured = me_dur.max(them_dur);
         let duration_ms = if captured > me_base { captured } else { me_base + wall_ms };
-        let mut mixed_path = None;
-        let had_audio = me_wav.is_some() || them_wav.is_some();
         for w in [me_wav, them_wav].into_iter().flatten() {
             let _ = w.finish();
         }
-        if had_audio {
-            let dir = a.dir.clone();
-            let shift_ms = them_offset - me_base;
-            mixed_path = tokio::task::spawn_blocking(move || mix_meeting_audio(&dir, shift_ms)).await.ok().flatten();
+        let (dir, me_path, them_path) = (a.dir.clone(), a.me_wav.clone(), a.them_wav.clone());
+        let shift_ms = them_offset - me_base;
+        let mixed_path = tokio::task::spawn_blocking(move || {
+            mix_meeting_audio(&dir, me_path.as_deref(), them_path.as_deref(), shift_ms)
+        })
+        .await
+        .ok()
+        .flatten();
+        st.db.update_recording(&id, |r| {
+            r.duration_ms = duration_ms;
+            if let Some(p) = &mixed_path {
+                r.audio_path = Some(p.to_string_lossy().into_owned());
+            }
+        })?;
+
+        if quitting {
+            if tokio::time::timeout(Duration::from_secs(5), &mut a.worker).await.is_err() {
+                log::warn!("quitting before the meeting transcript caught up");
+                a.worker.abort();
+            }
+        } else {
+            let _ = (&mut a.worker).await;
         }
+        let _ = std::fs::remove_dir_all(&a.spool_dir);
 
         let rec = st
             .db
             .update_recording(&id, |r| {
-                r.duration_ms = duration_ms;
                 r.segments.sort_by_key(|s| s.start_ms);
-                if let Some(p) = &mixed_path {
-                    r.audio_path = Some(p.to_string_lossy().into_owned());
-                }
                 r.status = "ready".into();
             })?
             .ok_or_else(|| anyhow!("meeting vanished"))?;
         st.emit("recording:updated", &id);
 
         let s = st.settings();
-        if s.meetings.auto_enhance && !rec.segments.is_empty() && s.llm(&s.meetings.llm_profile).is_some() {
+        if !quitting && s.meetings.auto_enhance && !rec.segments.is_empty() && s.llm(&s.meetings.llm_profile).is_some()
+        {
             let id2 = id.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = enhance(&id2, None).await {
@@ -546,6 +622,59 @@ impl Meetings {
             }
         });
     }
+}
+
+#[cfg(target_os = "macos")]
+struct SystemStart {
+    me: Arc<Mutex<Segmenter>>,
+    them: Arc<Mutex<Option<Segmenter>>>,
+    them_init: ThemInit,
+    paused: Arc<AtomicBool>,
+    system: SystemSlot,
+    error: Arc<Mutex<Option<String>>>,
+    stopping: Arc<AtomicBool>,
+}
+
+/// Start the system-audio tap on its own thread (it can block on the
+/// permission prompt). The "Them" segmenter is created on the first audio, at
+/// the mic's current position, so a slow prompt doesn't shift the timeline.
+#[cfg(target_os = "macos")]
+fn start_system_capture(c: SystemStart) {
+    let SystemStart { me, them, them_init, paused, system, error, stopping } = c;
+    std::thread::spawn(move || {
+        let them2 = them.clone();
+        let res = crate::audio::system_macos::SystemAudioCapture::start(Box::new(move |pcm| {
+            if paused.load(Ordering::Relaxed) {
+                return;
+            }
+            let mut slot = them2.lock();
+            if slot.is_none() {
+                // `stop` takes `them_init` first, so this can't revive a stopped meeting.
+                let Some((queue, wav)) = them_init.lock().take() else { return };
+                let offset = me.lock().duration_ms();
+                let sink = wav.and_then(|p| WavSink::create(&p, SAMPLE_RATE, 1).ok());
+                *slot = Some(Segmenter::new(THEM, offset, queue, sink));
+            }
+            if let Some(seg) = slot.as_mut() {
+                seg.push(pcm);
+            }
+        }));
+        match res {
+            Ok(mut cap) => {
+                let mut slot = system.lock();
+                if stopping.load(Ordering::SeqCst) {
+                    drop(slot);
+                    cap.stop();
+                } else {
+                    *slot = Some(cap);
+                }
+            }
+            Err(e) => {
+                log::error!("system audio: {e:#}");
+                *error.lock() = Some(format!("{e}"));
+            }
+        }
+    });
 }
 
 fn default_title() -> String {
@@ -688,19 +817,9 @@ async fn transcribe_worker(id: String, mut rx: mpsc::UnboundedReceiver<Chunk>, q
 
 /// Mix this session's me/them WAVs into one mono file (appending to an
 /// existing mix when a meeting was resumed).
-fn mix_meeting_audio(dir: &Path, them_shift_ms: i64) -> Option<PathBuf> {
-    let newest = |prefix: &str| -> Option<PathBuf> {
-        let mut v: Vec<PathBuf> = std::fs::read_dir(dir)
-            .ok()?
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with(prefix)))
-            .collect();
-        v.sort();
-        v.pop()
-    };
-    let me = newest("me-");
-    let them = newest("them-");
+fn mix_meeting_audio(dir: &Path, me: Option<&Path>, them: Option<&Path>, them_shift_ms: i64) -> Option<PathBuf> {
+    let me = me.filter(|p| p.exists()).map(Path::to_path_buf);
+    let them = them.filter(|p| p.exists()).map(Path::to_path_buf);
     let read = |p: &Option<PathBuf>| -> Vec<i16> {
         p.as_ref()
             .and_then(|p| hound::WavReader::open(p).ok())

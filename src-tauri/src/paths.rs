@@ -10,6 +10,8 @@ pub fn init(app_data: PathBuf) {
     for d in [root(), models_dir(), audio_dir(), media_dir()] {
         let _ = std::fs::create_dir_all(d);
     }
+    // Spooled meeting audio from a session that didn't end cleanly.
+    let _ = std::fs::remove_dir_all(spool_dir());
 }
 
 pub fn root() -> PathBuf {
@@ -23,6 +25,11 @@ pub fn models_dir() -> PathBuf {
 /// Recorded audio (dictations, meetings).
 pub fn audio_dir() -> PathBuf {
     root().join("audio")
+}
+
+/// Temporary per-session meeting audio waiting for transcription.
+pub fn spool_dir() -> PathBuf {
+    root().join("spool")
 }
 
 /// Imported / downloaded media for file transcriptions.

@@ -190,6 +190,7 @@
   "capture_system_audio": true,
   "keep_audio": true,
   "auto_enhance": true,
+  "auto_enhance_confirmed": true,
   "llm_profile": "claude-code",
   "default_template": "general",
   "templates": [

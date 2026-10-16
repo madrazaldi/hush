@@ -69,10 +69,19 @@ pub fn type_text(text: &str, cancelled: &dyn Fn() -> bool) -> Result<()> {
 
 /// Insert text by pasting through the clipboard, restoring the previous
 /// clipboard afterwards unless the user changed it in the meantime.
-pub fn paste_text(text: &str, restore: bool) -> Result<()> {
+/// `cancelled` is checked right before ⌘V, after the pasteboard settles.
+pub fn paste_text(text: &str, restore: bool, cancelled: &dyn Fn() -> bool) -> Result<()> {
     let snapshot = if restore { clipboard::snapshot() } else { None };
     let change = clipboard::set_text(text, true)?;
     std::thread::sleep(Duration::from_millis(40));
+    if cancelled() {
+        if let Some(snap) = snapshot
+            && clipboard::change_count() == change
+        {
+            clipboard::restore(snap);
+        }
+        return Ok(());
+    }
     press_paste()?;
     if let Some(snap) = snapshot {
         // Give the target app time to read the pasteboard before restoring.

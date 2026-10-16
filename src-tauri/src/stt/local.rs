@@ -3,11 +3,13 @@
 //! Loaded models are cached (the most recent two) because loading a 700 MB
 //! GGUF takes a second or two, which would ruin dictation latency.
 
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock};
 
 use anyhow::{Result, anyhow};
 use parking_lot::Mutex;
-use transcribe_cpp::{Feature, Model, RunOptions, Session, Task, TimestampKind};
+use transcribe_cpp::{CancelToken, Feature, Model, RunOptions, Session, Task, TimestampKind};
 
 use super::{SAMPLE_RATE, Segment, SttOptions, Transcript, Word, models};
 
@@ -65,6 +67,14 @@ pub fn evict(id: &str) {
 /// Release every loaded model. Must run before process exit: ggml's Metal
 /// backend asserts if buffers are still alive when its static teardown runs.
 pub fn shutdown() {
+    for t in RUNNING.lock().values() {
+        t.cancel();
+    }
+    // Aborted runs return between decode steps; give them a moment to unwind.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while IN_FLIGHT.load(Ordering::SeqCst) > 0 && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
     CACHE.lock().clear();
 }
 
@@ -138,44 +148,129 @@ fn convert(t: transcribe_cpp::Transcript) -> Transcript {
     Transcript { text: t.text.trim().to_string(), language: t.language.filter(|l| !l.is_empty()), segments }
 }
 
-fn transcribe_blocking(
-    id: &str,
+/// Cancel tokens of runs in flight, so `shutdown` can stop them.
+static RUNNING: LazyLock<Mutex<HashMap<u64, CancelToken>>> = LazyLock::new(Default::default);
+static NEXT_RUN: AtomicU64 = AtomicU64::new(0);
+static IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+
+/// Counts a blocking engine call as in flight for its whole lifetime.
+struct InFlight;
+
+impl InFlight {
+    fn enter() -> Self {
+        IN_FLIGHT.fetch_add(1, Ordering::SeqCst);
+        InFlight
+    }
+}
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        IN_FLIGHT.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Registers a run's token, and cancels it when the async caller is dropped
+/// (job cancelled, app quitting) or finishes.
+struct RunGuard {
+    key: u64,
+    token: CancelToken,
+}
+
+impl RunGuard {
+    fn new() -> Self {
+        let key = NEXT_RUN.fetch_add(1, Ordering::Relaxed);
+        let token = CancelToken::new();
+        RUNNING.lock().insert(key, token.clone());
+        RunGuard { key, token }
+    }
+}
+
+impl Drop for RunGuard {
+    fn drop(&mut self) {
+        self.token.cancel();
+        RUNNING.lock().remove(&self.key);
+    }
+}
+
+fn cancelled() -> anyhow::Error {
+    anyhow!("Cancelled")
+}
+
+/// Run one chunk on the model's shared session.
+fn run_chunk(loaded: &Loaded, chunk: &[f32], ro: &RunOptions, token: &CancelToken) -> Result<Transcript> {
+    let _in_flight = InFlight::enter();
+    if token.is_cancelled() {
+        return Err(cancelled());
+    }
+    let mut session = loaded.session.lock();
+    // Checked again: the session may have been busy (another job) while we waited.
+    if token.is_cancelled() {
+        return Err(cancelled());
+    }
+    session.set_cancel_token(token);
+    let res = session.run(chunk, ro);
+    session.clear_cancel_token();
+    match res {
+        Ok(r) => Ok(convert(r)),
+        Err(_) if token.is_cancelled() => Err(cancelled()),
+        // Truncated/repetition still carries a usable partial transcript.
+        Err(e) => match e.partial() {
+            Some(p) => Ok(convert(p.clone())),
+            None => Err(anyhow!("transcription failed: {e}")),
+        },
+    }
+}
+
+pub async fn transcribe(
+    model_id: &str,
     pcm: &[f32],
     opts: &SttOptions,
     progress: &(dyn Fn(f32) + Send + Sync),
 ) -> Result<Transcript> {
-    let loaded = load(id)?;
-    let ro = run_options(&loaded.model, opts);
-    let mut session = loaded.session.lock();
+    // The engine is synchronous, so each chunk runs on the blocking pool. The
+    // session is locked per chunk rather than per file, so a dictation can slip
+    // in between the chunks of a long file instead of waiting for all of it.
+    let run = RunGuard::new();
+    let token = run.token.clone();
 
-    let max_ms = session
-        .limits()
-        .ok()
-        .map(|l| l.effective_max_audio_ms)
-        .filter(|&m| m > 0)
-        .map(|m| (m - 2_000).min(DEFAULT_CHUNK_MS))
-        .unwrap_or(DEFAULT_CHUNK_MS);
+    let id = model_id.to_string();
+    let opts = opts.clone();
+    let (loaded, ro, max_ms) = tokio::task::spawn_blocking(move || -> Result<_> {
+        let loaded = load(&id)?;
+        let ro = run_options(&loaded.model, &opts);
+        let max_ms = loaded
+            .session
+            .lock()
+            .limits()
+            .ok()
+            .map(|l| l.effective_max_audio_ms)
+            .filter(|&m| m > 0)
+            .map(|m| (m - 2_000).min(DEFAULT_CHUNK_MS))
+            .unwrap_or(DEFAULT_CHUNK_MS);
+        Ok((loaded, Arc::new(ro), max_ms))
+    })
+    .await
+    .map_err(|e| anyhow!("transcription task panicked: {e}"))??;
+
     let max_samples = (max_ms as usize) * (SAMPLE_RATE as usize) / 1000;
     let chunks = crate::audio::split_at_silences(pcm, max_samples);
     let total = chunks.len();
 
     let mut out = Transcript::default();
     for (i, (start, chunk)) in chunks.into_iter().enumerate() {
+        if token.is_cancelled() {
+            return Err(cancelled());
+        }
         if !crate::audio::has_voice(chunk) {
             progress((i + 1) as f32 / total as f32);
             continue;
         }
-        let res = match session.run(chunk, &ro) {
-            Ok(r) => r,
-            // Truncated/repetition still carries a usable partial transcript.
-            Err(e) => match e.partial() {
-                Some(p) => p.clone(),
-                None => return Err(anyhow!("transcription failed: {e}")),
-            },
-        };
+        let (l, r, t, owned) = (loaded.clone(), ro.clone(), token.clone(), chunk.to_vec());
+        let mut piece = tokio::task::spawn_blocking(move || run_chunk(&l, &owned, &r, &t))
+            .await
+            .map_err(|e| anyhow!("transcription task panicked: {e}"))??;
         let offset_ms = (start as i64) * 1000 / SAMPLE_RATE as i64;
         let chunk_ms = (chunk.len() as i64) * 1000 / SAMPLE_RATE as i64;
-        let mut piece = convert(res);
         if piece.segments.is_empty() && !piece.text.is_empty() {
             piece.segments.push(Segment {
                 start_ms: 0,
@@ -197,29 +292,6 @@ fn transcribe_blocking(
         progress((i + 1) as f32 / total as f32);
     }
     Ok(out)
-}
-
-pub async fn transcribe(
-    model_id: &str,
-    pcm: &[f32],
-    opts: &SttOptions,
-    progress: &(dyn Fn(f32) + Send + Sync),
-) -> Result<Transcript> {
-    // The engine is synchronous; run it off the async runtime. Progress is
-    // forwarded through a channel since the callback isn't 'static.
-    let id = model_id.to_string();
-    let pcm = pcm.to_vec();
-    let opts = opts.clone();
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<f32>();
-    let handle = tokio::task::spawn_blocking(move || {
-        transcribe_blocking(&id, &pcm, &opts, &move |p| {
-            let _ = tx.send(p);
-        })
-    });
-    while let Some(p) = rx.recv().await {
-        progress(p);
-    }
-    handle.await.map_err(|e| anyhow!("transcription task panicked: {e}"))?
 }
 
 /// Short human-readable engine info for diagnostics.

@@ -28,30 +28,47 @@
     if (scroller) scroller.scrollTop = scroller.scrollHeight;
   }
 
+  // Bumped when the component is reused for another recording, so a reply
+  // still streaming for the previous one is dropped instead of shown here.
+  let run = 0;
+  $effect(() => {
+    id;
+    run++;
+    streaming = null;
+    pending = null;
+    input = "";
+  });
+
   async function send(question: string, recipeId?: string) {
     if (!question.trim() || streaming !== null) return;
+    const mine = run;
+    const forId = id;
     pending = question;
     streaming = "";
     input = "";
     scroll();
     try {
       const { requestId: rid, result } = await streamLlm(
-        (r) => (recipeId ? api.runRecipe(id, recipeId, r) : api.chat(id, question, r)),
+        (r) => (recipeId ? api.runRecipe(forId, recipeId, r) : api.chat(forId, question, r)),
         (d) => {
+          if (mine !== run) return;
           streaming += d;
           scroll();
         },
       );
       requestId = rid;
       const answer = await result;
+      if (mine !== run) return;
       messages = [...messages, { role: "user", content: question }, { role: "assistant", content: answer }];
     } catch (e) {
       const msg = errorText(e);
-      if (!/cancel/i.test(msg)) app.toast("error", msg);
+      if (mine === run && !/cancel/i.test(msg)) app.toast("error", msg);
     } finally {
-      streaming = null;
-      pending = null;
-      scroll();
+      if (mine === run) {
+        streaming = null;
+        pending = null;
+        scroll();
+      }
     }
   }
 

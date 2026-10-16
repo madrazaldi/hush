@@ -127,6 +127,9 @@ pub struct MeetingSettings {
     pub keep_audio: bool,
     /// Generate enhanced notes automatically when a meeting ends.
     pub auto_enhance: bool,
+    /// Set once the user has turned `auto_enhance` on themselves. Older
+    /// versions defaulted it on, so without this flag it's treated as off.
+    pub auto_enhance_confirmed: bool,
     pub llm_profile: String,
     pub default_template: String,
     pub templates: Vec<NoteTemplate>,
@@ -216,6 +219,7 @@ impl Default for MeetingSettings {
             capture_system_audio: true,
             keep_audio: true,
             auto_enhance: false,
+            auto_enhance_confirmed: false,
             llm_profile: String::new(),
             default_template: "general".into(),
             templates: crate::ai::builtin_templates(),
@@ -274,8 +278,18 @@ impl Settings {
                 }
             })
             .unwrap_or_default();
+        s.migrate();
         s.normalize();
         s
+    }
+
+    /// Fix up settings written by older versions.
+    fn migrate(&mut self) {
+        // Sending meetings to an AI provider must be opted into: drop the old
+        // default-on value unless the user chose it.
+        if !self.meetings.auto_enhance_confirmed {
+            self.meetings.auto_enhance = false;
+        }
     }
 
     pub fn save(&self) -> Result<()> {
@@ -298,6 +312,11 @@ impl Settings {
 
     /// Ensure invariants after loading or after the UI sends an update.
     pub fn normalize(&mut self) {
+        // Anything that saves `auto_enhance: true` after `load` came from the
+        // user turning it on in the UI.
+        if self.meetings.auto_enhance {
+            self.meetings.auto_enhance_confirmed = true;
+        }
         if !self.stt_profiles.iter().any(|p| p.id == LOCAL_PROFILE) {
             self.stt_profiles.insert(0, Settings::default().stt_profiles.remove(0));
         }
@@ -365,5 +384,24 @@ fn merge_builtins<T: Clone>(list: &mut Vec<T>, builtins: Vec<T>, id: impl Fn(&T)
         if !list.iter().any(|x| id(x) == id(&b)) {
             list.insert(0, b);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_auto_enhance_needs_consent() {
+        let mut legacy: Settings = serde_json::from_str(r#"{"meetings": {"auto_enhance": true}}"#).unwrap();
+        assert!(legacy.meetings.auto_enhance && !legacy.meetings.auto_enhance_confirmed);
+        legacy.migrate();
+        legacy.normalize();
+        assert!(!legacy.meetings.auto_enhance);
+
+        let mut chosen = Settings::default();
+        chosen.meetings.auto_enhance = true;
+        chosen.normalize();
+        assert!(chosen.meetings.auto_enhance_confirmed);
     }
 }
