@@ -17,15 +17,31 @@ fn enigo() -> Result<Enigo> {
     Enigo::new(&EnigoSettings::default()).map_err(|e| anyhow!("input simulation unavailable: {e}"))
 }
 
+/// Run `f` on the main thread and wait for its result. enigo resolves keys
+/// through Text Input Sources, which macOS asserts (SIGTRAP) off the main queue.
+fn on_main<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
+    #[cfg(target_os = "macos")]
+    if objc2::MainThreadMarker::new().is_some() {
+        return f();
+    }
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    crate::state::get().app.run_on_main_thread(move || {
+        let _ = tx.send(f());
+    })?;
+    rx.recv().map_err(|_| anyhow!("main thread dropped input task"))?
+}
+
 /// Press a modifier + key chord, holding it briefly so slow apps don't drop it.
 fn chord(modifier: enigo::Key, key: enigo::Key) -> Result<()> {
-    let mut e = enigo()?;
-    e.key(modifier, Direction::Press)?;
-    std::thread::sleep(Duration::from_millis(15));
-    e.key(key, Direction::Click)?;
-    std::thread::sleep(Duration::from_millis(60));
-    e.key(modifier, Direction::Release)?;
-    Ok(())
+    on_main(move || {
+        let mut e = enigo()?;
+        e.key(modifier, Direction::Press)?;
+        std::thread::sleep(Duration::from_millis(15));
+        e.key(key, Direction::Click)?;
+        std::thread::sleep(Duration::from_millis(60));
+        e.key(modifier, Direction::Release)?;
+        Ok(())
+    })
 }
 
 #[cfg(target_os = "macos")]
@@ -45,23 +61,23 @@ pub fn press_enter(with_primary: bool) -> Result<()> {
     if with_primary {
         chord(PRIMARY, enigo::Key::Return)
     } else {
-        let mut e = enigo()?;
-        e.key(enigo::Key::Return, Direction::Click)?;
-        Ok(())
+        on_main(|| {
+            enigo()?.key(enigo::Key::Return, Direction::Click)?;
+            Ok(())
+        })
     }
 }
 
 /// Type text as keystrokes. `cancelled` is checked between chunks so Escape
 /// can stop a long insertion part-way.
 pub fn type_text(text: &str, cancelled: &dyn Fn() -> bool) -> Result<()> {
-    let mut e = enigo()?;
     // Typing very long strings in one call can drop characters in some apps.
     for chunk in text.chars().collect::<Vec<_>>().chunks(64) {
         if cancelled() {
             return Ok(());
         }
         let s: String = chunk.iter().collect();
-        e.text(&s)?;
+        on_main(move || Ok(enigo()?.text(&s)?))?;
         std::thread::sleep(Duration::from_millis(8));
     }
     Ok(())
