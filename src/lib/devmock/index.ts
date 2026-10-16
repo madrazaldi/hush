@@ -3,7 +3,7 @@
 
 import settingsFixture from "./settings.json";
 import catalog from "../../../src-tauri/resources/models.json";
-import type { Dictation, Recording, RecordingSummary, Segment } from "$lib/types";
+import type { Dictation, Recording, RecordingSummary, Segment } from "#lib/types.js";
 
 type Cb = (payload: unknown) => void;
 

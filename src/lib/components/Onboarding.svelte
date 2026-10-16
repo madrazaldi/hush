@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { api, errorText } from "$lib/api";
-  import { app } from "$lib/state.svelte";
-  import { bytes } from "$lib/format";
-  import type { CliStatus } from "$lib/types";
-  import { LLM_KINDS } from "$lib/providers";
+  import { api, errorText } from "#lib/api.js";
+  import { app } from "#lib/state.svelte.js";
+  import { bytes } from "#lib/format.js";
+  import type { CliStatus } from "#lib/types.js";
+  import { LLM_KINDS } from "#lib/providers.js";
   import Keys from "./Keys.svelte";
   import { Check, Download, Mic, Keyboard, Speaker, Sparkles, ArrowRight } from "@lucide/svelte";
   import { fade, fly } from "svelte/transition";

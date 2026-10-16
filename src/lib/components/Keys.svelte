@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { keyGlyphs } from "$lib/format";
+  import { keyGlyphs } from "#lib/format.js";
   let { combo }: { combo: string } = $props();
 </script>
 

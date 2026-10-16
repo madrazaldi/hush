@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { on } from "$lib/api";
-  import type { OverlayState } from "$lib/types";
+  import { on } from "#lib/api.js";
+  import type { OverlayState } from "#lib/types.js";
   import { Check, Lock, TriangleAlert, Wand } from "@lucide/svelte";
 
   const BARS = 22;

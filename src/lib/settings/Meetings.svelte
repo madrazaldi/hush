@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { api } from "$lib/api";
-  import { app } from "$lib/state.svelte";
-  import { LANGUAGES } from "$lib/format";
-  import { newId } from "$lib/providers";
-  import type { InputDevice, NoteTemplate, Recipe } from "$lib/types";
-  import Section from "$lib/components/Section.svelte";
-  import Field from "$lib/components/Field.svelte";
-  import Toggle from "$lib/components/Toggle.svelte";
+  import { api } from "#lib/api.js";
+  import { app } from "#lib/state.svelte.js";
+  import { LANGUAGES } from "#lib/format.js";
+  import { newId } from "#lib/providers.js";
+  import type { InputDevice, NoteTemplate, Recipe } from "#lib/types.js";
+  import Section from "#lib/components/Section.svelte";
+  import Field from "#lib/components/Field.svelte";
+  import Toggle from "#lib/components/Toggle.svelte";
   import { Plus, Trash2, ChevronDown } from "@lucide/svelte";
 
   const s = $derived(app.settings!);

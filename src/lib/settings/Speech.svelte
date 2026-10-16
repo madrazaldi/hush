@@ -1,13 +1,13 @@
 <script lang="ts">
   import { ask } from "@tauri-apps/plugin-dialog";
   import { openUrl } from "@tauri-apps/plugin-opener";
-  import { api, errorText } from "$lib/api";
-  import { app } from "$lib/state.svelte";
-  import { bytes } from "$lib/format";
-  import { STT_KINDS, STT_PRESETS, blankStt } from "$lib/providers";
-  import type { ModelStatus, SttProfile } from "$lib/types";
-  import Section from "$lib/components/Section.svelte";
-  import Field from "$lib/components/Field.svelte";
+  import { api, errorText } from "#lib/api.js";
+  import { app } from "#lib/state.svelte.js";
+  import { bytes } from "#lib/format.js";
+  import { STT_KINDS, STT_PRESETS, blankStt } from "#lib/providers.js";
+  import type { ModelStatus, SttProfile } from "#lib/types.js";
+  import Section from "#lib/components/Section.svelte";
+  import Field from "#lib/components/Field.svelte";
   import { Check, Download, Trash2, X, Plus, Cloud, Cpu, Globe, Zap, KeyRound, LoaderCircle, ExternalLink } from "@lucide/svelte";
 
   const s = $derived(app.settings!);

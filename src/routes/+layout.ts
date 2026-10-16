@@ -7,6 +7,6 @@ export const ssr = false;
 export const load = async () => {
   // Outside Tauri (plain browser during development) fake the IPC layer.
   if (import.meta.env.DEV && !("__TAURI_INTERNALS__" in window)) {
-    (await import("$lib/devmock")).install();
+    (await import("#lib/devmock/index.js")).install();
   }
 };

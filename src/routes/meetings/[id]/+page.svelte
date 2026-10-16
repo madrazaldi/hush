@@ -3,16 +3,16 @@
   import { goto } from "$app/navigation";
   import { ask } from "@tauri-apps/plugin-dialog";
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-  import { api, errorText, on } from "$lib/api";
-  import { app } from "$lib/state.svelte";
-  import { clock, duration, relDate } from "$lib/format";
-  import type { Recording, RecordingPatch } from "$lib/types";
-  import Transcript from "$lib/components/Transcript.svelte";
-  import Player from "$lib/components/Player.svelte";
-  import Chat from "$lib/components/Chat.svelte";
-  import Markdown from "$lib/components/Markdown.svelte";
-  import ExportMenu from "$lib/components/ExportMenu.svelte";
-  import Levels from "$lib/components/Levels.svelte";
+  import { api, errorText, on } from "#lib/api.js";
+  import { app } from "#lib/state.svelte.js";
+  import { clock, duration, relDate } from "#lib/format.js";
+  import type { Recording, RecordingPatch } from "#lib/types.js";
+  import Transcript from "#lib/components/Transcript.svelte";
+  import Player from "#lib/components/Player.svelte";
+  import Chat from "#lib/components/Chat.svelte";
+  import Markdown from "#lib/components/Markdown.svelte";
+  import ExportMenu from "#lib/components/ExportMenu.svelte";
+  import Levels from "#lib/components/Levels.svelte";
   import {
     ChevronLeft,
     Copy,

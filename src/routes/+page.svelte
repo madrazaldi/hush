@@ -1,13 +1,13 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { open } from "@tauri-apps/plugin-dialog";
-  import { api, errorText, streamLlm } from "$lib/api";
-  import { app } from "$lib/state.svelte";
-  import { duration, relDate } from "$lib/format";
-  import { MEDIA_EXTS } from "$lib/media";
-  import type { Dictation, RecordingSummary, Stats } from "$lib/types";
-  import Keys from "$lib/components/Keys.svelte";
-  import Markdown from "$lib/components/Markdown.svelte";
+  import { api, errorText, streamLlm } from "#lib/api.js";
+  import { app } from "#lib/state.svelte.js";
+  import { duration, relDate } from "#lib/format.js";
+  import { MEDIA_EXTS } from "#lib/media.js";
+  import type { Dictation, RecordingSummary, Stats } from "#lib/types.js";
+  import Keys from "#lib/components/Keys.svelte";
+  import Markdown from "#lib/components/Markdown.svelte";
   import { ArrowUp, FileAudio, Flame, Mic, Square, Users, Sparkles, X } from "@lucide/svelte";
 
   let stats = $state<Stats | null>(null);

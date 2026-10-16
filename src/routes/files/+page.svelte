@@ -1,11 +1,11 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { open } from "@tauri-apps/plugin-dialog";
-  import { api, errorText, on } from "$lib/api";
-  import { app } from "$lib/state.svelte";
-  import { duration, relDate, LANGUAGES } from "$lib/format";
-  import { MEDIA_EXTS, isVideo } from "$lib/media";
-  import type { JobProgress, RecordingSummary } from "$lib/types";
+  import { api, errorText, on } from "#lib/api.js";
+  import { app } from "#lib/state.svelte.js";
+  import { duration, relDate, LANGUAGES } from "#lib/format.js";
+  import { MEDIA_EXTS, isVideo } from "#lib/media.js";
+  import type { JobProgress, RecordingSummary } from "#lib/types.js";
   import { FileAudio, FileVideo, Link, Search, Star, Upload, X, CircleAlert, LoaderCircle } from "@lucide/svelte";
 
   let items = $state<RecordingSummary[]>([]);
