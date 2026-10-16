@@ -1,0 +1,84 @@
+name: Release
+
+# Push a tag like v0.2.0 (matching "version" in src-tauri/tauri.conf.json)
+# to build the macOS app and publish a GitHub release with the .dmg.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to (re)build, e.g. v0.1.0
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build macOS (Apple Silicon)
+    runs-on: macos-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - name: Check tag matches app version
+        run: |
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          if [ "v$version" != "$TAG" ]; then
+            echo "::error::Tag $TAG does not match tauri.conf.json version $version"
+            exit 1
+          fi
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: release
+      - run: pnpm install --frozen-lockfile
+
+      # Code signing and notarization are optional. Add these repository secrets
+      # to ship a signed, notarized build; without them the app is ad-hoc signed.
+      - name: Configure signing
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [ -n "${!v}" ]; then echo "$v=${!v}" >> "$GITHUB_ENV"; fi
+          done
+          if [ -z "$APPLE_SIGNING_IDENTITY" ]; then echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"; fi
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ env.TAG }}
+          releaseName: Hush ${{ env.TAG }}
+          releaseBody: |
+            **Hush** for macOS 14.2+ on Apple Silicon.
+
+            Download `Hush_*_aarch64.dmg`, open it and drag Hush to Applications.
+
+            If this build isn't notarized, macOS will say the app "is damaged" or "can't be opened". Clear the download quarantine once:
+
+            ```sh
+            xattr -dr com.apple.quarantine /Applications/Hush.app
+            ```
+
+            See the [README](https://github.com/${{ github.repository }}#readme) for setup and permissions.
+          releaseDraft: false
+          prerelease: ${{ contains(env.TAG, '-') }}
+          args: --target aarch64-apple-darwin
