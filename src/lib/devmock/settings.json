@@ -1,0 +1,294 @@
+{
+ "general": {
+  "launch_at_login": false,
+  "show_in_dock": true,
+  "theme": "system",
+  "history_days": 0,
+  "onboarded": true
+ },
+ "stt_profiles": [
+  {
+   "id": "local",
+   "name": "On-device",
+   "kind": "local",
+   "model": "parakeet-tdt-0.6b-v3",
+   "base_url": "",
+   "api_key": ""
+  }
+ ],
+ "llm_profiles": [
+  {
+   "id": "claude-code",
+   "name": "Claude Code",
+   "kind": "claude_code",
+   "model": "haiku",
+   "base_url": "",
+   "api_key": "",
+   "bin_path": "",
+   "effort": ""
+  },
+  {
+   "id": "codex",
+   "name": "Codex",
+   "kind": "codex",
+   "model": "",
+   "base_url": "",
+   "api_key": "",
+   "bin_path": "",
+   "effort": ""
+  },
+  {
+   "id": "opencode",
+   "name": "opencode",
+   "kind": "opencode",
+   "model": "",
+   "base_url": "",
+   "api_key": "",
+   "bin_path": "",
+   "effort": ""
+  },
+  {
+   "id": "antigravity",
+   "name": "Antigravity",
+   "kind": "antigravity",
+   "model": "",
+   "base_url": "",
+   "api_key": "",
+   "bin_path": "",
+   "effort": ""
+  }
+ ],
+ "vocabulary": [
+  "Hush",
+  "Parakeet",
+  "Kubernetes",
+  "OKRs"
+ ],
+ "replacements": [
+  {
+   "from": "my email",
+   "to": "alex@example.com"
+  }
+ ],
+ "dictation": {
+  "enabled": true,
+  "hotkey": "Fn",
+  "activation": "hybrid",
+  "hold_ms": 300,
+  "command_hotkey": "Fn+Shift",
+  "paste_last_hotkey": "Cmd+Ctrl+V",
+  "stt_profile": "local",
+  "language": null,
+  "mic_device": null,
+  "paste_method": "paste",
+  "restore_clipboard": true,
+  "auto_submit": "off",
+  "trailing_space": true,
+  "sounds": true,
+  "mute_system_audio": false,
+  "overlay": "bottom",
+  "remove_fillers": true,
+  "llm_enabled": true,
+  "llm_profile": "claude-code",
+  "default_style": "clean",
+  "styles": [
+   {
+    "id": "verbatim",
+    "name": "Verbatim",
+    "prompt": "",
+    "apps": [],
+    "builtin": true
+   },
+   {
+    "id": "clean",
+    "name": "Clean",
+    "prompt": "Fix punctuation, capitalization and obvious recognition errors. Remove filler words, false starts and repetitions. When the speaker corrects themselves (\"Tuesday, no, Wednesday\"), keep only the correction. Keep the speaker's wording, tone and language otherwise. Format spoken lists as lists when clearly intended.",
+    "apps": [],
+    "builtin": true
+   },
+   {
+    "id": "message",
+    "name": "Message",
+    "prompt": "Casual chat message. Keep it short and natural, conversational tone, light punctuation. No greeting or sign-off unless spoken. Use normal sentence capitalization.",
+    "apps": [
+     "Slack",
+     "Messages",
+     "Discord",
+     "WhatsApp",
+     "Telegram",
+     "Signal",
+     "Microsoft Teams"
+    ],
+    "builtin": true
+   },
+   {
+    "id": "email",
+    "name": "Email",
+    "prompt": "Well-structured email body: clear paragraphs, a greeting and sign-off only if spoken, professional but friendly tone. Do not invent content or a subject line.",
+    "apps": [
+     "Mail",
+     "Outlook",
+     "Spark",
+     "Superhuman",
+     "Mimestream"
+    ],
+    "builtin": true
+   },
+   {
+    "id": "notes",
+    "name": "Notes",
+    "prompt": "Organized notes in Markdown: short headings or bullet points where the content is list-like, concise phrasing, keep every fact the speaker said.",
+    "apps": [
+     "Notes",
+     "Notion",
+     "Obsidian",
+     "Bear",
+     "Craft",
+     "Logseq"
+    ],
+    "builtin": true
+   },
+   {
+    "id": "prompt",
+    "name": "AI prompt / code",
+    "prompt": "The text is an instruction for an AI assistant or a technical note in a code editor or terminal. Make it clear and precise. Preserve technical terms, file names, identifiers, commands and code exactly; format code identifiers in `backticks` when obvious. Do not answer or execute the request.",
+    "apps": [
+     "Cursor",
+     "Code",
+     "Visual Studio Code",
+     "Zed",
+     "Xcode",
+     "Terminal",
+     "iTerm2",
+     "Ghostty",
+     "Warp",
+     "ChatGPT",
+     "Claude",
+     "T3 Code"
+    ],
+    "builtin": true
+   },
+   {
+    "id": "formal",
+    "name": "Formal",
+    "prompt": "Polished, formal written prose suitable for documents. Complete sentences, precise wording, no contractions or slang. Preserve all meaning.",
+    "apps": [
+     "Pages",
+     "Microsoft Word",
+     "Google Docs"
+    ],
+    "builtin": true
+   }
+  ],
+  "app_context": true,
+  "keep_audio": false
+ },
+ "meetings": {
+  "stt_profile": "local",
+  "language": null,
+  "mic_device": null,
+  "capture_system_audio": true,
+  "keep_audio": true,
+  "auto_enhance": true,
+  "llm_profile": "claude-code",
+  "default_template": "general",
+  "templates": [
+   {
+    "id": "general",
+    "name": "General meeting",
+    "description": "Summary, key points, decisions, action items",
+    "prompt": "Sections:\n## Summary\n2\u20134 sentences on purpose and outcome.\n## Key points\nGrouped by topic, using the user's notes as the outline.\n## Decisions\n## Action items\n- [ ] Owner \u2014 task (due date if mentioned)\n## Open questions\nOmit any section that would be empty.",
+    "builtin": true
+   },
+   {
+    "id": "one-on-one",
+    "name": "1:1",
+    "description": "Updates, feedback, blockers, follow-ups",
+    "prompt": "Sections:\n## Updates\n## Wins\n## Blockers & concerns\n## Feedback\nAttribute who gave feedback to whom.\n## Career & growth\n## Follow-ups\n- [ ] Owner \u2014 task\nOmit empty sections. Keep it candid and concise.",
+    "builtin": true
+   },
+   {
+    "id": "standup",
+    "name": "Standup",
+    "description": "Per-person yesterday / today / blockers",
+    "prompt": "For each person who spoke, a heading with their name (or Me / Them) and bullets:\n**Done**, **Next**, **Blockers**.\nFinish with ## Team blockers and ## Follow-ups. Very concise.",
+    "builtin": true
+   },
+   {
+    "id": "customer",
+    "name": "Customer call",
+    "description": "Pains, quotes, product signals, next steps",
+    "prompt": "Sections:\n## Context\nWho they are, their role and company, why we spoke.\n## Problems in their words\nInclude short verbatim quotes in quotation marks.\n## Current workaround\n## Product signals & feature requests\n## Objections / risks\n## Next steps\n- [ ] Owner \u2014 task (date)",
+    "builtin": true
+   },
+   {
+    "id": "interview",
+    "name": "Interview",
+    "description": "Candidate signal against criteria",
+    "prompt": "Sections:\n## Candidate summary\n## Experience highlights\n## Strengths\n## Concerns\n## Notable answers\nShort paraphrases with timestamps if useful.\n## Recommendation\nOnly if the interviewer expressed one; otherwise list what evidence is still missing.",
+    "builtin": true
+   },
+   {
+    "id": "brainstorm",
+    "name": "Brainstorm",
+    "description": "Ideas, themes, favorites, next steps",
+    "prompt": "Sections:\n## Goal\n## Ideas\nGroup related ideas under themes; note who proposed each when clear.\n## Favorites & why\n## Parked ideas\n## Next steps",
+    "builtin": true
+   },
+   {
+    "id": "lecture",
+    "name": "Lecture / talk",
+    "description": "Study notes with concepts and examples",
+    "prompt": "Write study notes: ## Overview, then a section per major concept with definitions, explanations and examples given, then ## Key takeaways and ## Questions to review.",
+    "builtin": true
+   }
+  ],
+  "recipes": [
+   {
+    "id": "follow-up",
+    "name": "Write follow-up email",
+    "prompt": "Draft a concise follow-up email to the other participants: thank them, recap decisions, list action items with owners and dates, and propose next steps. Plain text, ready to paste.",
+    "builtin": true
+   },
+   {
+    "id": "actions",
+    "name": "List action items",
+    "prompt": "List every action item as a Markdown checklist: `- [ ] Owner \u2014 task (due date)`. Include implicit commitments (\"I'll send that over\"). Group by owner.",
+    "builtin": true
+   },
+   {
+    "id": "exec-summary",
+    "name": "Executive summary",
+    "prompt": "Write a 5-bullet executive summary for someone who missed the meeting: outcome, decisions, risks, asks, next steps.",
+    "builtin": true
+   },
+   {
+    "id": "decisions",
+    "name": "Decision log",
+    "prompt": "Extract every decision made, with the reasoning given and any alternatives that were rejected. Table: Decision | Why | Alternatives rejected | Owner.",
+    "builtin": true
+   },
+   {
+    "id": "questions",
+    "name": "Open questions",
+    "prompt": "List unresolved questions and disagreements, who raised them, and what would resolve them.",
+    "builtin": true
+   },
+   {
+    "id": "coach",
+    "name": "Coach me",
+    "prompt": "Give me candid feedback on how I (\"Me\") communicated in this meeting: clarity, listening, talk-time balance, and two specific things to do better next time, citing moments from the transcript.",
+    "builtin": true
+   }
+  ],
+  "detect_meetings": true,
+  "your_name": "Alex Rivera"
+ },
+ "files": {
+  "stt_profile": "local",
+  "language": null,
+  "diarize": false,
+  "llm_profile": "claude-code",
+  "auto_summarize": false
+ }
+}
