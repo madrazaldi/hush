@@ -31,7 +31,7 @@ jobs:
             echo "::error::Tag $TAG does not match tauri.conf.json version $version"
             exit 1
           fi
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v4
         with:
           node-version: 22
