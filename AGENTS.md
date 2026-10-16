@@ -2,18 +2,18 @@
 
 Hush is a macOS (Apple Silicon, 14.2+) desktop app: dictation, file transcription and
 meeting notes. Tauri 2 + Rust (edition 2024) backend, SvelteKit SPA frontend
-(Svelte 5 runes, TypeScript), pnpm. Read `DESIGN.md` for the research and architecture.
+(Svelte 5 runes, TypeScript), bun. Use bun for everything JS (not npm/pnpm/yarn). Read `DESIGN.md` for the research and architecture.
 
 ## Commands
 
 ```sh
-pnpm install
-pnpm tauri dev                     # full app; Vite on 127.0.0.1:1427 (strictPort)
-pnpm dev                           # UI only in a browser, backed by src/lib/devmock
-pnpm check                         # svelte-check (must be 0 errors, 0 warnings)
-pnpm build                         # static SPA into build/
+bun install
+bun tauri dev                      # full app; Vite on 127.0.0.1:1427 (strictPort)
+bun run dev                        # UI only in a browser, backed by src/lib/devmock
+bun run check                      # svelte-check (must be 0 errors, 0 warnings)
+bun run build                      # static SPA into build/
 cd src-tauri && cargo test --lib   # Rust unit tests
-cd src-tauri && cargo clippy --all-targets
+cd src-tauri && cargo fmt && cargo clippy --all-targets -- -D warnings   # CI enforces both
 cd src-tauri && cargo run --release --example transcribe -- <file> [model-id]
 cd src-tauri && cargo run --release --example llm      # dictation cleanup via installed CLIs
 cd src-tauri && cargo run --release --example systap   # system-audio tap smoke test
@@ -51,5 +51,5 @@ Building needs CMake (transcribe-cpp compiles ggml with Metal). The first build 
 - Never log or commit API keys. The devmock settings fixture must keep `api_key` empty.
 - Design: serif headings (New York), warm "ink" dark / "paper" light palettes, ember
   accent. Use the tokens in `app.css` rather than literal colours.
-- Verify UI changes in the browser preview (`pnpm dev`, `?onboarding`, `?live`,
-  `window.__hushEmit(event, payload)`) and run `pnpm check` + `cargo test --lib`.
+- Verify UI changes in the browser preview (`bun run dev`, `?onboarding`, `?live`,
+  `window.__hushEmit(event, payload)`) and run `bun run check` + `cargo test --lib`.

@@ -19,25 +19,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      # Vite and svelte-check run on Node.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm check
-      - run: pnpm build
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun run build
 
   rust:
     name: Rust (fmt, clippy, tests)
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      # Vite and svelte-check run on Node.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -45,7 +49,7 @@ jobs:
         with:
           workspaces: src-tauri
       # tauri::generate_context! embeds the built frontend, so build it first.
-      - run: pnpm install --frozen-lockfile && pnpm build
+      - run: bun install --frozen-lockfile && bun run build
       - name: cargo fmt
         working-directory: src-tauri
         run: cargo fmt --check

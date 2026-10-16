@@ -1,5 +1,5 @@
 // Dev-only stand-in for the Tauri IPC so the UI can run in a plain browser
-// (`pnpm dev`, then open http://127.0.0.1:1427). Never bundled in builds.
+// (`bun run dev`, then open http://127.0.0.1:1427). Never bundled in builds.
 
 import settingsFixture from "./settings.json";
 import catalog from "../../../src-tauri/resources/models.json";

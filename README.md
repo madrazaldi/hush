@@ -65,13 +65,13 @@ AI is used for dictation polish, command mode, meeting notes, summaries, transla
 
 ## Development
 
-Requirements: macOS 14.2 or later (for system audio capture), Rust, Node and pnpm, and CMake (to build transcribe-cpp). Optional: `ffmpeg` (more media formats) and `yt-dlp` (link imports).
+Requirements: macOS 14.2 or later (for system audio capture), Rust, [Bun](https://bun.sh) (plus Node 22 for Vite), and CMake (to build transcribe-cpp). Optional: `ffmpeg` (more media formats) and `yt-dlp` (link imports).
 
 ```sh
-pnpm install
-pnpm tauri dev          # the app; Vite serves on 127.0.0.1:1427
-pnpm tauri build        # release .app / .dmg
-pnpm check              # svelte-check
+bun install
+bun tauri dev           # the app; Vite serves on 127.0.0.1:1427
+bun tauri build         # release .app / .dmg
+bun run check           # svelte-check
 cd src-tauri && cargo test --lib
 ```
 
@@ -91,7 +91,7 @@ cd src-tauri && cargo test --lib
 
 ### UI without the Rust side
 
-`pnpm dev`, then open http://127.0.0.1:1427 in a browser. In dev builds, when the page runs outside Tauri, `src/lib/devmock` fakes the IPC with fixture data.
+`bun run dev`, then open http://127.0.0.1:1427 in a browser. In dev builds, when the page runs outside Tauri, `src/lib/devmock` fakes the IPC with fixture data.
 
 - Add `?onboarding` to the URL for the first-run flow, or `?live` for a meeting in progress.
 - `window.__hushEmit(event, payload)` fires any backend event. For example, open `/overlay` and send `dictation:state` and `dictation:level`.

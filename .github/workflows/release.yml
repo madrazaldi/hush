@@ -31,11 +31,13 @@ jobs:
             echo "::error::Tag $TAG does not match tauri.conf.json version $version"
             exit 1
           fi
-      - uses: pnpm/action-setup@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      # Vite and svelte-check run on Node.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin
@@ -43,7 +45,7 @@ jobs:
         with:
           workspaces: src-tauri
           key: release
-      - run: pnpm install --frozen-lockfile
+      - run: bun install --frozen-lockfile
 
       # Code signing and notarization are optional. Add these repository secrets
       # to ship a signed, notarized build; without them the app is ad-hoc signed.
@@ -81,4 +83,5 @@ jobs:
             See the [README](https://github.com/${{ github.repository }}#readme) for setup and permissions.
           releaseDraft: false
           prerelease: ${{ contains(env.TAG, '-') }}
+          tauriScript: bun tauri
           args: --target aarch64-apple-darwin

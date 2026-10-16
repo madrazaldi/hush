@@ -4,12 +4,12 @@ updates:
     directory: /
     schedule:
       interval: monthly
-  - package-ecosystem: npm
+  - package-ecosystem: bun
     directory: /
     schedule:
       interval: monthly
     groups:
-      npm:
+      bun:
         patterns: ["*"]
   - package-ecosystem: cargo
     directory: /src-tauri
