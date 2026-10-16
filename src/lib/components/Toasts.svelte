@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app } from "$lib/state.svelte";
+  import { app } from "#lib/state.svelte.js";
   import { CircleAlert, CircleCheck, Info, X } from "@lucide/svelte";
   import { fly } from "svelte/transition";
 </script>

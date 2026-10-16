@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { app } from "$lib/state.svelte";
-  import { api } from "$lib/api";
-  import Section from "$lib/components/Section.svelte";
-  import Field from "$lib/components/Field.svelte";
-  import Toggle from "$lib/components/Toggle.svelte";
+  import { app } from "#lib/state.svelte.js";
+  import { api } from "#lib/api.js";
+  import Section from "#lib/components/Section.svelte";
+  import Field from "#lib/components/Field.svelte";
+  import Toggle from "#lib/components/Toggle.svelte";
   import { FolderOpen, Check, X } from "@lucide/svelte";
 
   const s = $derived(app.settings!);

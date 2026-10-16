@@ -3,13 +3,13 @@
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
-  import { api, errorText, on } from "$lib/api";
-  import { app } from "$lib/state.svelte";
-  import { MEDIA_EXTS } from "$lib/media";
-  import Sidebar from "$lib/components/Sidebar.svelte";
-  import Toasts from "$lib/components/Toasts.svelte";
-  import Onboarding from "$lib/components/Onboarding.svelte";
-  import MeetingBanner from "$lib/components/MeetingBanner.svelte";
+  import { api, errorText, on } from "#lib/api.js";
+  import { app } from "#lib/state.svelte.js";
+  import { MEDIA_EXTS } from "#lib/media.js";
+  import Sidebar from "#lib/components/Sidebar.svelte";
+  import Toasts from "#lib/components/Toasts.svelte";
+  import Onboarding from "#lib/components/Onboarding.svelte";
+  import MeetingBanner from "#lib/components/MeetingBanner.svelte";
   import { FileAudio } from "@lucide/svelte";
 
   let { children } = $props();

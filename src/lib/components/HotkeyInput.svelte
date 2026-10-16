@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, errorText } from "$lib/api";
+  import { api, errorText } from "#lib/api.js";
   import Keys from "./Keys.svelte";
 
   let {

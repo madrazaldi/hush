@@ -2,16 +2,16 @@
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
   import { ask } from "@tauri-apps/plugin-dialog";
-  import { api, errorText, on, streamLlm } from "$lib/api";
-  import { app } from "$lib/state.svelte";
-  import { duration, relDate, languageName, LANGUAGES, words } from "$lib/format";
-  import type { JobProgress, Recording, RecordingPatch } from "$lib/types";
-  import Transcript from "$lib/components/Transcript.svelte";
-  import Player from "$lib/components/Player.svelte";
-  import Chat from "$lib/components/Chat.svelte";
-  import Markdown from "$lib/components/Markdown.svelte";
-  import ExportMenu from "$lib/components/ExportMenu.svelte";
-  import Modal from "$lib/components/Modal.svelte";
+  import { api, errorText, on, streamLlm } from "#lib/api.js";
+  import { app } from "#lib/state.svelte.js";
+  import { duration, relDate, languageName, LANGUAGES, words } from "#lib/format.js";
+  import type { JobProgress, Recording, RecordingPatch } from "#lib/types.js";
+  import Transcript from "#lib/components/Transcript.svelte";
+  import Player from "#lib/components/Player.svelte";
+  import Chat from "#lib/components/Chat.svelte";
+  import Markdown from "#lib/components/Markdown.svelte";
+  import ExportMenu from "#lib/components/ExportMenu.svelte";
+  import Modal from "#lib/components/Modal.svelte";
   import {
     ChevronLeft,
     Ellipsis,

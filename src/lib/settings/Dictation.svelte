@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { api } from "$lib/api";
-  import { app } from "$lib/state.svelte";
-  import { LANGUAGES } from "$lib/format";
-  import type { InputDevice } from "$lib/types";
-  import Section from "$lib/components/Section.svelte";
-  import Field from "$lib/components/Field.svelte";
-  import Toggle from "$lib/components/Toggle.svelte";
-  import HotkeyInput from "$lib/components/HotkeyInput.svelte";
+  import { api } from "#lib/api.js";
+  import { app } from "#lib/state.svelte.js";
+  import { LANGUAGES } from "#lib/format.js";
+  import type { InputDevice } from "#lib/types.js";
+  import Section from "#lib/components/Section.svelte";
+  import Field from "#lib/components/Field.svelte";
+  import Toggle from "#lib/components/Toggle.svelte";
+  import HotkeyInput from "#lib/components/HotkeyInput.svelte";
 
   const s = $derived(app.settings!);
   const d = $derived(s.dictation);

@@ -1,12 +1,12 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
-  import General from "$lib/settings/General.svelte";
-  import Speech from "$lib/settings/Speech.svelte";
-  import Ai from "$lib/settings/Ai.svelte";
-  import DictationTab from "$lib/settings/Dictation.svelte";
-  import Meetings from "$lib/settings/Meetings.svelte";
-  import Permissions from "$lib/settings/Permissions.svelte";
+  import General from "#lib/settings/General.svelte";
+  import Speech from "#lib/settings/Speech.svelte";
+  import Ai from "#lib/settings/Ai.svelte";
+  import DictationTab from "#lib/settings/Dictation.svelte";
+  import Meetings from "#lib/settings/Meetings.svelte";
+  import Permissions from "#lib/settings/Permissions.svelte";
   import { AudioLines, Cog, Keyboard, ShieldCheck, Sparkles, Users } from "@lucide/svelte";
 
   const TABS = [
@@ -25,7 +25,7 @@
   <nav>
     <h1>Settings</h1>
     {#each TABS as t}
-      <button class:on={tab === t.id} onclick={() => goto(`/settings?tab=${t.id}`, { replaceState: true, noScroll: true })}>
+      <button class:on={tab === t.id} onclick={() => goto(`/settings?tab=${t.id}`, { replace: true, reset: false })}>
         <t.icon size={15} strokeWidth={1.8} />
         {t.label}
       </button>

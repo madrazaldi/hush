@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { api } from "$lib/api";
-  import { app } from "$lib/state.svelte";
-  import Section from "$lib/components/Section.svelte";
-  import Field from "$lib/components/Field.svelte";
+  import { api } from "#lib/api.js";
+  import { app } from "#lib/state.svelte.js";
+  import Section from "#lib/components/Section.svelte";
+  import Field from "#lib/components/Field.svelte";
   import { Check, RefreshCw } from "@lucide/svelte";
 
   const p = $derived(app.permissions);

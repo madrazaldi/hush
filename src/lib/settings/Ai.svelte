@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { api, errorText } from "$lib/api";
-  import { app } from "$lib/state.svelte";
-  import { LLM_KINDS, LLM_PRESETS, blankLlm } from "$lib/providers";
-  import type { CliStatus, LlmKind, LlmProfile } from "$lib/types";
-  import Section from "$lib/components/Section.svelte";
-  import Field from "$lib/components/Field.svelte";
+  import { api, errorText } from "#lib/api.js";
+  import { app } from "#lib/state.svelte.js";
+  import { LLM_KINDS, LLM_PRESETS, blankLlm } from "#lib/providers.js";
+  import type { CliStatus, LlmKind, LlmProfile } from "#lib/types.js";
+  import Section from "#lib/components/Section.svelte";
+  import Field from "#lib/components/Field.svelte";
   import { Check, Plus, Trash2, Terminal, Cloud, LoaderCircle, RefreshCw, ChevronDown } from "@lucide/svelte";
 
   const s = $derived(app.settings!);

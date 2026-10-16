@@ -1,7 +1,7 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
-  import { api, errorText } from "$lib/api";
-  import { app } from "$lib/state.svelte";
+  import { api, errorText } from "#lib/api.js";
+  import { app } from "#lib/state.svelte.js";
   import { Users, X } from "@lucide/svelte";
   import { slide } from "svelte/transition";
 

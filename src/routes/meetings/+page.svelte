@@ -1,9 +1,9 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
-  import { api, errorText } from "$lib/api";
-  import { app } from "$lib/state.svelte";
-  import { dayGroup, duration, groupBy } from "$lib/format";
-  import type { RecordingSummary } from "$lib/types";
+  import { api, errorText } from "#lib/api.js";
+  import { app } from "#lib/state.svelte.js";
+  import { dayGroup, duration, groupBy } from "#lib/format.js";
+  import type { RecordingSummary } from "#lib/types.js";
   import { Mic, NotebookPen, Search, Star, Radar } from "@lucide/svelte";
 
   let items = $state<RecordingSummary[]>([]);

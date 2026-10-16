@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import type { Segment } from "$lib/types";
-  import { clock } from "$lib/format";
+  import type { Segment } from "#lib/types.js";
+  import { clock } from "#lib/format.js";
 
   let {
     segments,

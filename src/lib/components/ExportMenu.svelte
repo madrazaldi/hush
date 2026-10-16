@@ -1,9 +1,9 @@
 <script lang="ts">
   import { save } from "@tauri-apps/plugin-dialog";
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-  import { api, errorText } from "$lib/api";
-  import { app } from "$lib/state.svelte";
-  import type { ExportOptions } from "$lib/types";
+  import { api, errorText } from "#lib/api.js";
+  import { app } from "#lib/state.svelte.js";
+  import type { ExportOptions } from "#lib/types.js";
   import { Download, Copy } from "@lucide/svelte";
 
   let { id, title, hasNotes = false, hasSpeakers = false }: { id: string; title: string; hasNotes?: boolean; hasSpeakers?: boolean } = $props();

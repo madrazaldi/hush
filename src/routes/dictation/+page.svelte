@@ -2,13 +2,13 @@
   import { page } from "$app/state";
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import { ask } from "@tauri-apps/plugin-dialog";
-  import { api, errorText } from "$lib/api";
-  import { app } from "$lib/state.svelte";
-  import { dayGroup, groupBy, words } from "$lib/format";
-  import { newId } from "$lib/providers";
-  import type { Dictation, Style } from "$lib/types";
-  import Keys from "$lib/components/Keys.svelte";
-  import Toggle from "$lib/components/Toggle.svelte";
+  import { api, errorText } from "#lib/api.js";
+  import { app } from "#lib/state.svelte.js";
+  import { dayGroup, groupBy, words } from "#lib/format.js";
+  import { newId } from "#lib/providers.js";
+  import type { Dictation, Style } from "#lib/types.js";
+  import Keys from "#lib/components/Keys.svelte";
+  import Toggle from "#lib/components/Toggle.svelte";
   import { Copy, Search, Trash2, Wand, Plus, X, ArrowRight, Terminal } from "@lucide/svelte";
 
   type Tab = "history" | "styles" | "vocabulary";

@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { assetUrl, isVideo } from "$lib/media";
-  import { clock } from "$lib/format";
+  import { assetUrl, isVideo } from "#lib/media.js";
+  import { clock } from "#lib/format.js";
   import { Pause, Play, RotateCcw, RotateCw } from "@lucide/svelte";
 
   let {

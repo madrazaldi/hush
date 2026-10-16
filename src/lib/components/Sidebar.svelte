@@ -1,9 +1,9 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
-  import { app } from "$lib/state.svelte";
-  import { api, errorText } from "$lib/api";
-  import { clock } from "$lib/format";
+  import { app } from "#lib/state.svelte.js";
+  import { api, errorText } from "#lib/api.js";
+  import { clock } from "#lib/format.js";
   import Keys from "./Keys.svelte";
   import { AudioLines, FileAudio, House, Mic, Settings, Square, Users } from "@lucide/svelte";
 
