@@ -29,7 +29,7 @@ pub type AudioCallback = Box<dyn FnMut(&[f32]) + Send + 'static>;
 /// start, and `finish` flushes the tail so the total length matches the
 /// input duration exactly.
 pub struct Resampler {
-    inner: Option<rubato::FftFixedIn<f32>>,
+    inner: Option<rubato::Fft<f32>>,
     /// Input carried over until a full block is available (always < `chunk`).
     pending: Vec<f32>,
     chunk: usize,
@@ -48,7 +48,8 @@ impl Resampler {
         use rubato::Resampler as _;
         let chunk = 1024;
         let inner =
-            rubato::FftFixedIn::<f32>::new(from_rate as usize, SAMPLE_RATE as usize, chunk, 2, 1).expect("resampler");
+            rubato::Fft::<f32>::new(from_rate as usize, SAMPLE_RATE as usize, chunk, 1, rubato::FixedSync::Input)
+                .expect("resampler");
         let skip = inner.output_delay();
         Self {
             inner: Some(inner),
@@ -69,12 +70,21 @@ impl Resampler {
         out.extend_from_slice(&res);
     }
 
-    fn run(&mut self, block: &[f32], out: &mut Vec<f32>) {
+    /// Resample one block. `partial` marks a final block shorter than `chunk`
+    /// (zero-padded by rubato); an empty partial block flushes the filter tail.
+    fn run(&mut self, block: &[f32], partial: bool, out: &mut Vec<f32>) -> rubato::ResampleResult<()> {
         use rubato::Resampler as _;
-        let Some(r) = self.inner.as_mut() else { return };
-        if let Ok(mut res) = r.process(&[block], None) {
-            self.push_out(res.swap_remove(0), out);
-        }
+        use rubato::audioadapter_buffers::direct::InterleavedSlice;
+        let Some(r) = self.inner.as_mut() else { return Ok(()) };
+        let mut res = vec![0.0; r.output_frames_next()];
+        let n = res.len();
+        let input = InterleavedSlice::new(block, 1, block.len()).expect("mono input");
+        let mut output = InterleavedSlice::new_mut(&mut res, 1, n).expect("mono output");
+        let indexing = partial.then(|| rubato::Indexing::new().partial_len(block.len()));
+        let (_, written) = r.process_into_buffer(&input, &mut output, indexing.as_ref())?;
+        res.truncate(written);
+        self.push_out(res, out);
+        Ok(())
     }
 
     pub fn process(&mut self, mut input: &[f32]) -> Vec<f32> {
@@ -91,13 +101,13 @@ impl Resampler {
                 return out;
             }
             let block = std::mem::take(&mut self.pending);
-            self.run(&block, &mut out);
+            let _ = self.run(&block, false, &mut out);
             self.pending = block;
             self.pending.clear();
         }
         let full = input.len() - input.len() % self.chunk;
         for block in input[..full].chunks(self.chunk) {
-            self.run(block, &mut out);
+            let _ = self.run(block, false, &mut out);
         }
         self.pending.extend_from_slice(&input[full..]);
         out
@@ -105,26 +115,19 @@ impl Resampler {
 
     /// Flush buffered input and the filter tail.
     pub fn finish(&mut self) -> Vec<f32> {
-        use rubato::Resampler as _;
         let mut out = Vec::new();
         if self.inner.is_none() {
             return out;
         }
         let target = (self.in_total as f64 * SAMPLE_RATE as f64 / self.from_rate as f64).round() as u64;
         let pending = std::mem::take(&mut self.pending);
-        if !pending.is_empty()
-            && let Ok(mut res) = self.inner.as_mut().unwrap().process_partial(Some(&[pending]), None)
-        {
-            self.push_out(res.swap_remove(0), &mut out);
+        if !pending.is_empty() {
+            let _ = self.run(&pending, true, &mut out);
         }
         // Feed silence until the delayed tail has come out.
         for _ in 0..8 {
-            if self.out_total >= target {
+            if self.out_total >= target || self.run(&[], true, &mut out).is_err() {
                 break;
-            }
-            match self.inner.as_mut().unwrap().process_partial(None::<&[Vec<f32>]>, None) {
-                Ok(mut res) => self.push_out(res.swap_remove(0), &mut out),
-                Err(_) => break,
             }
         }
         let extra = self.out_total.saturating_sub(target) as usize;

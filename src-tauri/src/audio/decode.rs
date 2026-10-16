@@ -7,12 +7,12 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, Result, anyhow, bail};
-use symphonia::core::audio::SampleBuffer;
-use symphonia::core::codecs::DecoderOptions;
-use symphonia::core::formats::FormatOptions;
+use symphonia::core::codecs::audio::AudioDecoderOptions;
+use symphonia::core::errors::Error as SymphoniaError;
+use symphonia::core::formats::probe::Hint;
+use symphonia::core::formats::{FormatOptions, TrackType};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
-use symphonia::core::probe::Hint;
 
 use crate::shell_env;
 use crate::stt::SAMPLE_RATE;
@@ -87,46 +87,38 @@ fn decode_symphonia(path: &Path, cancel: &AtomicBool) -> Result<Vec<f32>> {
     if let Some(e) = ext(path) {
         hint.with_extension(&e);
     }
-    let probed =
-        symphonia::default::get_probe().format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())?;
-    let mut format = probed.format;
-    let track = format
-        .tracks()
-        .iter()
-        .find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)
-        .ok_or_else(|| anyhow!("no audio track"))?;
+    let mut format =
+        symphonia::default::get_probe().probe(&hint, mss, FormatOptions::default(), MetadataOptions::default())?;
+    let track = format.default_track(TrackType::Audio).ok_or_else(|| anyhow!("no audio track"))?;
     let track_id = track.id;
-    let rate = track.codec_params.sample_rate.ok_or_else(|| anyhow!("unknown sample rate"))?;
-    let mut decoder = symphonia::default::get_codecs().make(&track.codec_params, &DecoderOptions::default())?;
+    let params = track.codec_params.as_ref().and_then(|p| p.audio()).ok_or_else(|| anyhow!("no audio track"))?;
+    let rate = params.sample_rate.ok_or_else(|| anyhow!("unknown sample rate"))?;
+    let mut decoder = symphonia::default::get_codecs().make_audio_decoder(params, &AudioDecoderOptions::default())?;
 
     // Resample as we go so the native-rate audio is never held in full.
     let mut resampler = super::Resampler::new(rate);
     let mut out: Vec<f32> = Vec::new();
-    let mut buf: Option<SampleBuffer<f32>> = None;
+    let mut buf: Vec<f32> = Vec::new();
     loop {
         check_cancel(cancel)?;
         let packet = match format.next_packet() {
-            Ok(p) => p,
-            Err(symphonia::core::errors::Error::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
-            Err(symphonia::core::errors::Error::ResetRequired) => break,
+            Ok(Some(p)) => p,
+            Ok(None) => break,
+            Err(SymphoniaError::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+            Err(SymphoniaError::ResetRequired) => break,
             Err(e) => return Err(e.into()),
         };
-        if packet.track_id() != track_id {
+        if packet.track_id != track_id {
             continue;
         }
         let decoded = match decoder.decode(&packet) {
             Ok(d) => d,
-            Err(symphonia::core::errors::Error::DecodeError(_)) => continue,
+            Err(SymphoniaError::DecodeError(_)) => continue,
             Err(e) => return Err(e.into()),
         };
-        let spec = *decoded.spec();
-        let channels = spec.channels.count().max(1);
-        let sb = buf.get_or_insert_with(|| SampleBuffer::new(decoded.capacity() as u64, spec));
-        if sb.capacity() < decoded.capacity() * channels {
-            *sb = SampleBuffer::new(decoded.capacity() as u64, spec);
-        }
-        sb.copy_interleaved_ref(decoded);
-        out.extend(resampler.process(&super::to_mono(sb.samples(), channels)));
+        let channels = decoded.spec().channels().count().max(1);
+        decoded.copy_to_vec_interleaved(&mut buf);
+        out.extend(resampler.process(&super::to_mono(&buf, channels)));
         if out.len() > MAX_SAMPLES {
             bail!(TooLong);
         }
@@ -339,5 +331,46 @@ mod tests {
 
         let err = decode_file(&path, &AtomicBool::new(true)).unwrap_err();
         assert_eq!(err.to_string(), "Cancelled");
+    }
+
+    #[test]
+    fn symphonia_decodes_and_resamples() {
+        let dir = tempfile::tempdir().unwrap();
+        let wav = dir.path().join("tone.wav");
+        let spec = hound::WavSpec {
+            channels: 2,
+            sample_rate: 44_100,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut w = hound::WavWriter::create(&wav, spec).unwrap();
+        for i in 0..44_100 * 2 {
+            let v = ((i as f32 * 440.0 * std::f32::consts::TAU / 44_100.0).sin() * 0.5 * i16::MAX as f32) as i16;
+            w.write_sample(v).unwrap();
+            w.write_sample(v).unwrap();
+        }
+        w.finalize().unwrap();
+
+        let mut inputs = vec![wav.clone()];
+        // AAC in MP4 as well, when the system encoder is around (macOS).
+        let m4a = dir.path().join("tone.m4a");
+        if std::process::Command::new("afconvert")
+            .args(["-f", "m4af", "-d", "aac"])
+            .arg(&wav)
+            .arg(&m4a)
+            .status()
+            .is_ok_and(|s| s.success())
+        {
+            inputs.push(m4a);
+        }
+        for path in inputs {
+            let pcm = decode_symphonia(&path, &AtomicBool::new(false)).unwrap();
+            let secs = pcm.len() as f64 / SAMPLE_RATE as f64;
+            // AAC priming/padding is not trimmed, so allow ~70 ms extra.
+            assert!((secs - 2.0).abs() < 0.1, "{}: decoded {secs} s", path.display());
+            let mid = &pcm[SAMPLE_RATE as usize / 2..SAMPLE_RATE as usize * 3 / 2];
+            let rms = (mid.iter().map(|x| x * x).sum::<f32>() / mid.len() as f32).sqrt();
+            assert!((rms - 0.5 / 2f32.sqrt()).abs() < 0.02, "{}: rms {rms}", path.display());
+        }
     }
 }
