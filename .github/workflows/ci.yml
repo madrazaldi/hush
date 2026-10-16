@@ -23,7 +23,7 @@ jobs:
         with:
           bun-version-file: package.json
       # Vite and svelte-check run on Node.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - run: bun install --frozen-lockfile
@@ -39,7 +39,7 @@ jobs:
         with:
           bun-version-file: package.json
       # Vite and svelte-check run on Node.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - uses: dtolnay/rust-toolchain@stable
