@@ -215,7 +215,7 @@ impl Default for MeetingSettings {
             mic_device: None,
             capture_system_audio: true,
             keep_audio: true,
-            auto_enhance: true,
+            auto_enhance: false,
             llm_profile: String::new(),
             default_template: "general".into(),
             templates: crate::ai::builtin_templates(),
@@ -279,16 +279,20 @@ impl Settings {
     }
 
     pub fn save(&self) -> Result<()> {
+        use std::io::Write;
         let path = paths::settings_file();
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_vec_pretty(self)?)?;
+        let dir = path.parent().ok_or_else(|| anyhow::anyhow!("settings path has no parent"))?;
+        // API keys live here. The temp file is created 0600 from the start (and
+        // with a unique name), so keys are never readable by other users.
+        let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            // API keys live here; keep the file private to the user.
-            let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+            tmp.as_file().set_permissions(std::fs::Permissions::from_mode(0o600))?;
         }
-        std::fs::rename(tmp, path)?;
+        tmp.write_all(&serde_json::to_vec_pretty(self)?)?;
+        tmp.as_file().sync_all()?;
+        tmp.persist(path)?;
         Ok(())
     }
 
@@ -315,7 +319,12 @@ impl Settings {
     }
 
     pub fn stt(&self, id: &str) -> SttProfile {
-        self.stt_profiles.iter().find(|p| p.id == id).or(self.stt_profiles.first()).cloned().expect("local profile exists")
+        self.stt_profiles
+            .iter()
+            .find(|p| p.id == id)
+            .or(self.stt_profiles.first())
+            .cloned()
+            .expect("local profile exists")
     }
 
     pub fn llm(&self, id: &str) -> Option<LlmProfile> {

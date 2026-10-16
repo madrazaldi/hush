@@ -88,7 +88,8 @@ pub fn run() {
             // First run: create LLM profiles for installed agent CLIs.
             if settings.llm_profiles.is_empty() {
                 tauri::async_runtime::spawn(async move {
-                    let found: Vec<_> = llm::detect_clis().await.into_iter().filter(|c| c.path.is_some()).map(|c| c.kind).collect();
+                    let found: Vec<_> =
+                        llm::detect_clis().await.into_iter().filter(|c| c.path.is_some()).map(|c| c.kind).collect();
                     let st = state::get();
                     let mut s = st.settings();
                     if s.llm_profiles.is_empty() && !found.is_empty() {
@@ -118,11 +119,11 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             // Closing the main window keeps Hush running in the menu bar.
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" {
-                    api.prevent_close();
-                    let _ = window.hide();
-                }
+            if let WindowEvent::CloseRequested { api, .. } = event
+                && window.label() == "main"
+            {
+                api.prevent_close();
+                let _ = window.hide();
             }
         })
         .invoke_handler(tauri::generate_handler![

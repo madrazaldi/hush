@@ -61,7 +61,11 @@ struct Recording {
 enum Phase {
     Idle,
     Recording(Box<Recording>),
-    Processing(CancellationToken),
+    /// Transcribing/inserting the recording from `session`.
+    Processing {
+        token: CancellationToken,
+        session: u64,
+    },
 }
 
 pub struct Dictation {
@@ -76,7 +80,14 @@ impl Default for Dictation {
     }
 }
 
-fn overlay_emit(phase: &'static str, mode: Mode, latched: bool, message: Option<String>, style: Option<String>, app: Option<String>) {
+fn overlay_emit(
+    phase: &'static str,
+    mode: Mode,
+    latched: bool,
+    message: Option<String>,
+    style: Option<String>,
+    app: Option<String>,
+) {
     state::get().emit("dictation:state", OverlayState { phase, mode, latched, message, style, app });
 }
 
@@ -126,7 +137,7 @@ impl Dictation {
                 std::thread::spawn(|| {
                     if let Ok(Some(d)) = state::get().db.last_dictation() {
                         let s = state::get().settings();
-                        let _ = insert_text(&d.text, &s);
+                        let _ = insert_text(&d.text, &s, &|| false);
                     }
                 });
             }
@@ -139,10 +150,20 @@ impl Dictation {
                         self.start(mode);
                     }
                     (Phase::Recording(rec), true) => {
-                        if mode == Mode::Command && rec.mode == Mode::Dictate && rec.started.elapsed() < Duration::from_millis(600) {
+                        if mode == Mode::Command
+                            && rec.mode == Mode::Dictate
+                            && rec.started.elapsed() < Duration::from_millis(600)
+                        {
                             // Fn then Shift: upgrade to command mode.
                             rec.mode = Mode::Command;
-                            overlay_emit("recording", Mode::Command, rec.latched, None, None, Some(rec.front.name.clone()));
+                            overlay_emit(
+                                "recording",
+                                Mode::Command,
+                                rec.latched,
+                                None,
+                                None,
+                                Some(rec.front.name.clone()),
+                            );
                         } else if rec.latched || activation == Activation::Toggle {
                             drop(phase);
                             self.finish();
@@ -235,7 +256,14 @@ impl Dictation {
         }));
         self.set_cancel(true);
         overlay::show(&st.app, s.dictation.overlay);
-        overlay_emit("recording", mode, false, None, if mode == Mode::Dictate { style } else { None }, Some(front.name));
+        overlay_emit(
+            "recording",
+            mode,
+            false,
+            None,
+            if mode == Mode::Dictate { style } else { None },
+            Some(front.name),
+        );
 
         // Safety stop for forgotten latched recordings.
         std::thread::spawn(move || {
@@ -272,7 +300,7 @@ impl Dictation {
                     platform::play(Sound::Cancel);
                 }
             }
-            Phase::Processing(tok) => tok.cancel(),
+            Phase::Processing { token, .. } => token.cancel(),
             Phase::Idle => return,
         }
         self.set_cancel(false);
@@ -283,11 +311,15 @@ impl Dictation {
     /// Stop recording and process in the background.
     pub fn finish(&self) {
         let token = CancellationToken::new();
-        let prev = std::mem::replace(&mut *self.phase.lock(), Phase::Processing(token.clone()));
-        let Phase::Recording(mut rec) = prev else {
-            *self.phase.lock() = prev;
-            return;
+        let mut phase = self.phase.lock();
+        let Phase::Recording(rec) = &*phase else { return };
+        let session = rec.session;
+        let Phase::Recording(mut rec) =
+            std::mem::replace(&mut *phase, Phase::Processing { token: token.clone(), session })
+        else {
+            unreachable!()
         };
+        drop(phase);
         rec.mic.stop();
         let st = state::get();
         let s = st.settings();
@@ -304,11 +336,16 @@ impl Dictation {
 
         tauri::async_runtime::spawn(async move {
             let result = tokio::select! {
-                r = process(pcm, mode, front, s.clone()) => r,
+                r = process(pcm, mode, front, s.clone(), token.clone()) => r,
                 _ = token.cancelled() => Ok(None),
             };
             let d = &state::get().dictation;
             let st = state::get();
+            // Once cancelled, `cancel()` has already reset the UI and a newer
+            // session may own the overlay and controller: touch nothing.
+            if token.is_cancelled() {
+                return;
+            }
             match result {
                 Ok(Some(text)) => {
                     overlay_emit("done", mode, false, Some(text.chars().take(80).collect()), None, None);
@@ -328,11 +365,11 @@ impl Dictation {
                 }
             }
             let mut phase = d.phase.lock();
-            if matches!(*phase, Phase::Processing(_)) {
+            if matches!(*phase, Phase::Processing { session: s, .. } if s == session) {
                 *phase = Phase::Idle;
+                drop(phase);
+                d.set_cancel(false);
             }
-            drop(phase);
-            d.set_cancel(false);
         });
     }
 }
@@ -358,15 +395,23 @@ pub fn pick_style<'a>(s: &'a Settings, front: &FrontApp) -> Option<&'a Style> {
     s.dictation
         .styles
         .iter()
-        .find(|st| st.apps.iter().any(|a| {
-            let a = a.to_lowercase();
-            !a.is_empty() && (a == name || a == bundle)
-        }))
+        .find(|st| {
+            st.apps.iter().any(|a| {
+                let a = a.to_lowercase();
+                !a.is_empty() && (a == name || a == bundle)
+            })
+        })
         .or_else(|| s.dictation.styles.iter().find(|st| st.id == s.dictation.default_style))
 }
 
 /// Full pipeline. Returns the inserted text, or None if there was nothing to insert.
-async fn process(pcm: Vec<f32>, mode: Mode, front: FrontApp, s: Settings) -> Result<Option<String>> {
+async fn process(
+    pcm: Vec<f32>,
+    mode: Mode,
+    front: FrontApp,
+    s: Settings,
+    token: CancellationToken,
+) -> Result<Option<String>> {
     let st = state::get();
     let duration_ms = (pcm.len() as i64) * 1000 / SAMPLE_RATE as i64;
     let trimmed = crate::audio::trim_silence(&pcm).to_vec();
@@ -375,11 +420,8 @@ async fn process(pcm: Vec<f32>, mode: Mode, front: FrontApp, s: Settings) -> Res
     }
 
     let profile = s.stt(&s.dictation.stt_profile);
-    let opts = SttOptions {
-        language: s.dictation.language.clone(),
-        vocabulary: s.vocabulary.clone(),
-        ..Default::default()
-    };
+    let opts =
+        SttOptions { language: s.dictation.language.clone(), vocabulary: s.vocabulary.clone(), ..Default::default() };
     let transcript = stt::transcribe(&profile, &trimmed, &opts, &|_| {}).await?;
     let raw = transcript.text.trim().to_string();
     if raw.is_empty() {
@@ -393,8 +435,10 @@ async fn process(pcm: Vec<f32>, mode: Mode, front: FrontApp, s: Settings) -> Res
 
     let text = match mode {
         Mode::Command => {
-            let profile = llm_profile.ok_or_else(|| anyhow::anyhow!("Command mode needs an AI provider (Settings → AI)"))?;
-            let selection = tokio::task::spawn_blocking(platform::selected_text).await.ok().flatten().unwrap_or_default();
+            let profile =
+                llm_profile.ok_or_else(|| anyhow::anyhow!("Command mode needs an AI provider (Settings → AI)"))?;
+            let selection =
+                tokio::task::spawn_blocking(platform::selected_text).await.ok().flatten().unwrap_or_default();
             let req = ai::command_request(&raw, &selection, app_name);
             used_llm = Some(profile.name.clone());
             llm::complete_text(&profile, &req).await?
@@ -406,18 +450,19 @@ async fn process(pcm: Vec<f32>, mode: Mode, front: FrontApp, s: Settings) -> Res
             }
             let style = pick_style(&s, &front);
             style_name = style.map(|st| st.name.clone());
-            if let (true, Some(style), Some(profile)) = (s.dictation.llm_enabled, style, llm_profile) {
-                if !style.prompt.trim().is_empty() {
-                    let req = ai::dictation_request(style, &text, &ai::DictationContext { app_name, vocabulary: &s.vocabulary });
-                    match tokio::time::timeout(Duration::from_secs(25), llm::complete_text(&profile, &req)).await {
-                        Ok(Ok(out)) if !out.trim().is_empty() => {
-                            used_llm = Some(profile.name.clone());
-                            text = out;
-                        }
-                        Ok(Ok(_)) => {}
-                        Ok(Err(e)) => log::warn!("LLM cleanup failed, inserting raw text: {e:#}"),
-                        Err(_) => log::warn!("LLM cleanup timed out, inserting raw text"),
+            if let (true, Some(style), Some(profile)) = (s.dictation.llm_enabled, style, llm_profile)
+                && !style.prompt.trim().is_empty()
+            {
+                let req =
+                    ai::dictation_request(style, &text, &ai::DictationContext { app_name, vocabulary: &s.vocabulary });
+                match tokio::time::timeout(Duration::from_secs(25), llm::complete_text(&profile, &req)).await {
+                    Ok(Ok(out)) if !out.trim().is_empty() => {
+                        used_llm = Some(profile.name.clone());
+                        text = out;
                     }
+                    Ok(Ok(_)) => {}
+                    Ok(Err(e)) => log::warn!("LLM cleanup failed, inserting raw text: {e:#}"),
+                    Err(_) => log::warn!("LLM cleanup timed out, inserting raw text"),
                 }
             }
             ai::rules::apply_replacements(&text, &s.replacements)
@@ -428,9 +473,17 @@ async fn process(pcm: Vec<f32>, mode: Mode, front: FrontApp, s: Settings) -> Res
         return Ok(None);
     }
 
-    let to_insert = if s.dictation.trailing_space && mode == Mode::Dictate && !text.ends_with('\n') { format!("{text} ") } else { text.clone() };
+    let to_insert = if s.dictation.trailing_space && mode == Mode::Dictate && !text.ends_with('\n') {
+        format!("{text} ")
+    } else {
+        text.clone()
+    };
     let settings = s.clone();
-    tokio::task::spawn_blocking(move || insert_text(&to_insert, &settings)).await??;
+    let cancel = token.clone();
+    tokio::task::spawn_blocking(move || insert_text(&to_insert, &settings, &|| cancel.is_cancelled())).await??;
+    if token.is_cancelled() {
+        return Ok(None);
+    }
 
     let audio_path = if s.dictation.keep_audio {
         let p = crate::paths::audio_dir().join(format!("dictation-{}.wav", db::now_ms()));
@@ -457,14 +510,22 @@ async fn process(pcm: Vec<f32>, mode: Mode, front: FrontApp, s: Settings) -> Res
     Ok(Some(text))
 }
 
-fn insert_text(text: &str, s: &Settings) -> Result<()> {
+/// Insert into the focused app. `cancelled` is polled before each step so a
+/// cancel during insertion stops further typing and the auto-submit key.
+fn insert_text(text: &str, s: &Settings, cancelled: &dyn Fn() -> bool) -> Result<()> {
+    if cancelled() {
+        return Ok(());
+    }
     match s.dictation.paste_method {
         PasteMethod::Paste => platform::paste_text(text, s.dictation.restore_clipboard)?,
-        PasteMethod::Type => platform::type_text(text)?,
+        PasteMethod::Type => platform::type_text(text, cancelled)?,
         PasteMethod::CopyOnly => {
             platform::copy_text(text)?;
             return Ok(());
         }
+    }
+    if cancelled() {
+        return Ok(());
     }
     match s.dictation.auto_submit {
         AutoSubmit::Off => {}

@@ -53,7 +53,10 @@
   const hasAi = $derived(!!s.llm_profiles.length);
 
   async function load(initial = false) {
-    const r = await api.recording(id);
+    const want = id;
+    const r = await api.recording(want);
+    // Navigated to another meeting while this was loading.
+    if (want !== id) return;
     if (initial) {
       notes = r?.notes ?? "";
       view = r?.enhanced ? "enhanced" : r?.segments.length && r.status === "ready" ? (hasAi ? "enhanced" : "transcript") : "notes";
@@ -69,6 +72,8 @@
     loaded = false;
     rec = null;
     load(true);
+    // Save pending edits to the meeting they were typed in before switching away.
+    return flushNotes;
   });
 
   $effect(() => {
@@ -93,9 +98,27 @@
     return () => offs.forEach((f) => f());
   });
 
+  // Debounced autosave. The target id and text are captured when typed, so a
+  // save that fires after navigation still lands on the right meeting.
+  let pendingNotes: { id: string; notes: string } | null = null;
+
+  function flushNotes() {
+    clearTimeout(notesTimer);
+    const p = pendingNotes;
+    pendingNotes = null;
+    if (p) api.updateRecording(p.id, { notes: p.notes }).catch((e) => app.toast("error", errorText(e)));
+  }
+
   function onNotes() {
     clearTimeout(notesTimer);
-    notesTimer = setTimeout(() => api.updateRecording(id, { notes }), 500);
+    pendingNotes = { id, notes };
+    notesTimer = setTimeout(flushNotes, 500);
+  }
+
+  async function saveNotesNow() {
+    clearTimeout(notesTimer);
+    pendingNotes = null;
+    await api.updateRecording(id, { notes });
   }
 
   async function patch(p: RecordingPatch) {
@@ -108,7 +131,7 @@
 
   async function start() {
     try {
-      await api.updateRecording(id, { notes });
+      await saveNotesNow();
       await api.meetingStart(id);
       await app.refreshMeeting();
       view = "notes";
@@ -120,8 +143,7 @@
 
   async function stop() {
     stopping = true;
-    clearTimeout(notesTimer);
-    await api.updateRecording(id, { notes });
+    await saveNotesNow();
     try {
       await api.meetingStop();
       app.meeting = null;
@@ -137,8 +159,7 @@
 
   async function enhance(templateId?: string) {
     if (!rec) return;
-    clearTimeout(notesTimer);
-    await api.updateRecording(id, { notes });
+    await saveNotesNow();
     enhancing = true;
     view = "enhanced";
     rec.enhanced = "";

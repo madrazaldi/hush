@@ -67,7 +67,7 @@ const recordings: Recording[] = [
     progress: 1,
     error: null,
     source: "/Users/alex/Downloads/voice-interface-42.mp3",
-    media_path: "/tmp/hush_test.wav",
+    media_path: "/Users/alex/Downloads/voice-interface-42.mp3",
     audio_path: null,
     language: "en",
     segments: fileSegments,
@@ -204,10 +204,38 @@ const handlers: Record<string, (a: any) => unknown> = {
       "Here's what I found:\n\n- **Fn** is the default dictation hotkey\n- The beta ships on the **24th**, pending Priya's overlay sign-off",
       a.requestId,
     ),
-  run_recipe: (a) => streamText("**Subject:** Dictation launch — next steps\n\nHi Sam, thanks for the sync today…", a.requestId),
+  run_recipe: (a) => streamText(
+      "**Subject:** Dictation launch — next steps\n\nHi Sam,\n\nThanks for the sync today. Quick recap:\n\n- **Fn** is the default hotkey; onboarding suggests right Option on non-Apple keyboards\n- Local models stay free, cloud is bring-your-own-key\n- Beta ships on the **24th**, pending Priya's overlay sign-off on Monday\n\nI'll send the onboarding write-up tomorrow.\n\nBest,\nAlex",
+      a.requestId,
+    ),
   ask_all: (a) => streamText("Across 3 meetings, the team decided to keep **local models free** and ship the beta on the 24th.", a.requestId),
   summarize: (a) => streamText(recordings.find((r) => r.id === a.id)?.summary || "Summary", a.requestId),
 };
+
+const tones = new Map<number, string>();
+function toneUrl(ms: number) {
+  if (tones.has(ms)) return tones.get(ms)!;
+  const rate = 8000;
+  const n = Math.round((rate * ms) / 1000);
+  const buf = new DataView(new ArrayBuffer(44 + n));
+  const str = (o: number, t: string) => [...t].forEach((c, i) => buf.setUint8(o + i, c.charCodeAt(0)));
+  str(0, "RIFF");
+  buf.setUint32(4, 36 + n, true);
+  str(8, "WAVEfmt ");
+  buf.setUint32(16, 16, true);
+  buf.setUint16(20, 1, true);
+  buf.setUint16(22, 1, true);
+  buf.setUint32(24, rate, true);
+  buf.setUint32(28, rate, true);
+  buf.setUint16(32, 1, true);
+  buf.setUint16(34, 8, true);
+  str(36, "data");
+  buf.setUint32(40, n, true);
+  for (let i = 0; i < n; i++) buf.setUint8(44 + i, 128 + Math.round(2 * Math.sin(i / 20)));
+  const url = URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+  tones.set(ms, url);
+  return url;
+}
 
 const listeners = new Map<string, Map<number, Cb>>();
 const callbacks = new Map<number, Cb>();
@@ -233,7 +261,8 @@ export function install() {
     unregisterCallback(id: number) {
       callbacks.delete(id);
     },
-    convertFileSrc: (p: string) => `/@fs${p}`,
+    // Fixture media paths don't exist; play a quiet tone of the right length instead.
+    convertFileSrc: (p: string) => toneUrl(recordings.find((r) => r.media_path === p || r.audio_path === p)?.duration_ms ?? 60_000),
     async invoke(cmd: string, args: any = {}) {
       if (cmd === "plugin:event|listen") {
         if (!listeners.has(args.event)) listeners.set(args.event, new Map());

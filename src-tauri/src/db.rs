@@ -12,8 +12,7 @@ pub struct Db {
     conn: Mutex<Connection>,
 }
 
-const MIGRATIONS: &[&str] = &[
-    r#"
+const MIGRATIONS: &[&str] = &[r#"
     CREATE TABLE dictations (
         id TEXT PRIMARY KEY,
         created_at INTEGER NOT NULL,
@@ -55,8 +54,7 @@ const MIGRATIONS: &[&str] = &[
         starred INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX recordings_kind_created ON recordings(kind, created_at DESC);
-    "#,
-];
+    "#];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Dictation {
@@ -157,7 +155,10 @@ impl Db {
             "UPDATE recordings SET status='error', error='Interrupted (the app was closed)' WHERE status IN ('processing','queued') AND kind='file'",
             [],
         )?;
-        conn.execute("UPDATE recordings SET status='ready' WHERE status IN ('recording','processing') AND kind='meeting'", [])?;
+        conn.execute(
+            "UPDATE recordings SET status='ready' WHERE status IN ('recording','processing') AND kind='meeting'",
+            [],
+        )?;
         Ok(Self { conn: Mutex::new(conn) })
     }
 
@@ -227,7 +228,8 @@ impl Db {
         }
         let cutoff = now_ms() - days as i64 * 86_400_000;
         let conn = self.conn.lock();
-        let mut stmt = conn.prepare("SELECT audio_path FROM dictations WHERE created_at < ?1 AND audio_path IS NOT NULL")?;
+        let mut stmt =
+            conn.prepare("SELECT audio_path FROM dictations WHERE created_at < ?1 AND audio_path IS NOT NULL")?;
         let paths = stmt.query_map([cutoff], |r| r.get::<_, String>(0))?.flatten().collect();
         conn.execute("DELETE FROM dictations WHERE created_at < ?1", [cutoff])?;
         Ok(paths)
@@ -266,7 +268,11 @@ impl Db {
     }
 
     pub fn upsert_recording(&self, rec: &Recording) -> Result<()> {
-        self.conn.lock().execute(
+        Self::write_recording(&self.conn.lock(), rec)
+    }
+
+    fn write_recording(conn: &Connection, rec: &Recording) -> Result<()> {
+        conn.execute(
             &format!(
                 "INSERT OR REPLACE INTO recordings ({}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)",
                 Self::REC_COLS
@@ -300,17 +306,23 @@ impl Db {
     }
 
     pub fn get_recording(&self, id: &str) -> Result<Option<Recording>> {
-        let conn = self.conn.lock();
+        Self::read_recording(&self.conn.lock(), id)
+    }
+
+    fn read_recording(conn: &Connection, id: &str) -> Result<Option<Recording>> {
         Ok(conn
             .query_row(&format!("SELECT {} FROM recordings WHERE id=?1", Self::REC_COLS), [id], Self::recording_row)
             .optional()?)
     }
 
-    /// Read-modify-write a recording under the connection lock's protection.
+    /// Read-modify-write a recording atomically. The connection lock is held
+    /// throughout, so concurrent updates can't overwrite each other and an
+    /// update racing a delete can't resurrect the row.
     pub fn update_recording(&self, id: &str, f: impl FnOnce(&mut Recording)) -> Result<Option<Recording>> {
-        let Some(mut rec) = self.get_recording(id)? else { return Ok(None) };
+        let conn = self.conn.lock();
+        let Some(mut rec) = Self::read_recording(&conn, id)? else { return Ok(None) };
         f(&mut rec);
-        self.upsert_recording(&rec)?;
+        Self::write_recording(&conn, &rec)?;
         Ok(Some(rec))
     }
 
@@ -357,9 +369,22 @@ impl Db {
     }
 
     pub fn delete_recording(&self, id: &str) -> Result<Option<Recording>> {
-        let rec = self.get_recording(id)?;
-        self.conn.lock().execute("DELETE FROM recordings WHERE id=?1", [id])?;
+        let conn = self.conn.lock();
+        let rec = Self::read_recording(&conn, id)?;
+        conn.execute("DELETE FROM recordings WHERE id=?1", [id])?;
         Ok(rec)
+    }
+
+    /// Whether any recording references `path` or a file under it (translated
+    /// copies share their original's media).
+    pub fn media_in_use(&self, path: &str) -> Result<bool> {
+        let under = format!("{}/%", path.trim_end_matches('/'));
+        Ok(self.conn.lock().query_row(
+            "SELECT EXISTS(SELECT 1 FROM recordings
+               WHERE media_path = ?1 OR audio_path = ?1 OR media_path LIKE ?2 OR audio_path LIKE ?2)",
+            params![path, under],
+            |r| r.get::<_, i64>(0),
+        )? != 0)
     }
 
     pub fn stats(&self) -> Result<Stats> {
@@ -377,11 +402,9 @@ impl Db {
             }
         }
         let count = |kind: &str| -> rusqlite::Result<(i64, i64)> {
-            conn.query_row(
-                "SELECT COUNT(*), COALESCE(SUM(duration_ms),0) FROM recordings WHERE kind=?1",
-                [kind],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
+            conn.query_row("SELECT COUNT(*), COALESCE(SUM(duration_ms),0) FROM recordings WHERE kind=?1", [kind], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
         };
         let (file_count, file_ms) = count("file")?;
         let (meeting_count, meeting_ms) = count("meeting")?;
@@ -403,16 +426,16 @@ impl Db {
         use chrono::Datelike;
         let today = chrono::Local::now().date_naive().num_days_from_ce() as i64;
         let mut streak = 0;
-        if let Some(&first) = days.first() {
-            if today - first <= 1 {
-                let mut expect = first;
-                for d in days {
-                    if d == expect {
-                        streak += 1;
-                        expect -= 1;
-                    } else {
-                        break;
-                    }
+        if let Some(&first) = days.first()
+            && today - first <= 1
+        {
+            let mut expect = first;
+            for d in days {
+                if d == expect {
+                    streak += 1;
+                    expect -= 1;
+                } else {
+                    break;
                 }
             }
         }

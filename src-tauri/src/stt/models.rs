@@ -47,9 +47,8 @@ struct Catalog {
     models: Vec<CatalogModel>,
 }
 
-static CATALOG: LazyLock<Catalog> = LazyLock::new(|| {
-    serde_json::from_str(include_str!("../../resources/models.json")).expect("valid models.json")
-});
+static CATALOG: LazyLock<Catalog> =
+    LazyLock::new(|| serde_json::from_str(include_str!("../../resources/models.json")).expect("valid models.json"));
 
 pub fn catalog() -> &'static [CatalogModel] {
     &CATALOG.models
@@ -151,9 +150,15 @@ pub async fn download(id: &str, on_progress: impl Fn(f32) + Send + Sync + 'stati
     result
 }
 
-async fn download_inner(m: &CatalogModel, token: &CancellationToken, on_progress: &(dyn Fn(f32) + Send + Sync)) -> Result<()> {
+async fn download_inner(
+    m: &CatalogModel,
+    token: &CancellationToken,
+    on_progress: &(dyn Fn(f32) + Send + Sync),
+) -> Result<()> {
     let mut urls = vec![format!("https://huggingface.co/{}/resolve/{}/{}", m.repo, m.revision, m.filename)];
-    urls.extend(CATALOG.mirrors.iter().map(|b| format!("{}/{}/{}/{}", b.trim_end_matches('/'), m.repo, m.revision, m.filename)));
+    urls.extend(
+        CATALOG.mirrors.iter().map(|b| format!("{}/{}/{}/{}", b.trim_end_matches('/'), m.repo, m.revision, m.filename)),
+    );
 
     let client = reqwest::Client::builder().connect_timeout(std::time::Duration::from_secs(15)).build()?;
     let dest = model_path(m);

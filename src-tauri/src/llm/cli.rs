@@ -143,23 +143,16 @@ fn parse_line(kind: LlmKind, v: &Value) -> Result<(Option<String>, Option<String
             }
             "result" => {
                 if v["is_error"].as_bool().unwrap_or(false) {
-                    bail!(
-                        "Claude Code error: {}",
-                        s(&v["result"]).unwrap_or_else(|| v["subtype"].to_string())
-                    );
+                    bail!("Claude Code error: {}", s(&v["result"]).unwrap_or_else(|| v["subtype"].to_string()));
                 }
                 (None, s(&v["result"]))
             }
             _ => (None, None),
         },
         LlmKind::Codex => match ty {
-            "item.completed" if v["item"]["type"] == "agent_message" => {
-                (s(&v["item"]["text"]), None)
-            }
+            "item.completed" if v["item"]["type"] == "agent_message" => (s(&v["item"]["text"]), None),
             "turn.failed" | "error" => {
-                let msg = s(&v["error"]["message"])
-                    .or_else(|| s(&v["message"]))
-                    .unwrap_or_else(|| v.to_string());
+                let msg = s(&v["error"]["message"]).or_else(|| s(&v["message"])).unwrap_or_else(|| v.to_string());
                 bail!("Codex error: {msg}")
             }
             _ => (None, None),
@@ -256,13 +249,13 @@ pub async fn complete(profile: &LlmProfile, req: &ChatRequest, on_delta: DeltaFn
         Ok::<_, anyhow::Error>((status, final_text.unwrap_or(streamed)))
     };
 
-    let (status, text) = tokio::time::timeout(TIMEOUT, run)
-        .await
-        .map_err(|_| anyhow!("{} timed out", profile.kind.default_bin()))??;
+    let (status, text) =
+        tokio::time::timeout(TIMEOUT, run).await.map_err(|_| anyhow!("{} timed out", profile.kind.default_bin()))??;
     let stderr = stderr_task.await.unwrap_or_default();
 
     if !status.success() && text.trim().is_empty() {
-        let tail: String = stderr.lines().rev().take(8).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");
+        let tail: String =
+            stderr.lines().rev().take(8).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");
         bail!("{} exited with {status}: {tail}", profile.kind.default_bin());
     }
     if text.trim().is_empty() {
@@ -289,16 +282,11 @@ pub async fn version(bin: &Path) -> Option<String> {
 }
 
 pub async fn opencode_models(profile: &LlmProfile) -> Result<Vec<String>> {
-    let bin = shell_env::resolve_bin(Some(&profile.bin_path), "opencode")
-        .ok_or_else(|| anyhow!("opencode not found"))?;
+    let bin =
+        shell_env::resolve_bin(Some(&profile.bin_path), "opencode").ok_or_else(|| anyhow!("opencode not found"))?;
     let out = tokio::time::timeout(
         Duration::from_secs(30),
-        Command::new(bin)
-            .arg("models")
-            .env("PATH", shell_env::path())
-            .stdin(Stdio::null())
-            .kill_on_drop(true)
-            .output(),
+        Command::new(bin).arg("models").env("PATH", shell_env::path()).stdin(Stdio::null()).kill_on_drop(true).output(),
     )
     .await??;
     Ok(String::from_utf8_lossy(&out.stdout)

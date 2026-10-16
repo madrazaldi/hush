@@ -16,8 +16,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use cidre::core_audio::{
-    self as ca, AggregateDevice, DeviceIoProcId, aggregate_device_keys as agg_keys,
-    sub_device_keys,
+    self as ca, AggregateDevice, DeviceIoProcId, aggregate_device_keys as agg_keys, sub_device_keys,
 };
 use cidre::{cat, cf, ns, os};
 use ringbuf::traits::{Consumer, Producer, Split};
@@ -96,8 +95,7 @@ extern "C" fn io_proc(
                 let frames = bytes / (4 * ch);
                 let data = unsafe { std::slice::from_raw_parts(buf.data as *const i32, frames * ch) };
                 for f in data.chunks_exact(ch) {
-                    let s: f32 =
-                        f.iter().map(|v| *v as f32 / 2_147_483_648.0).sum::<f32>() / ch as f32;
+                    let s: f32 = f.iter().map(|v| *v as f32 / 2_147_483_648.0).sum::<f32>() / ch as f32;
                     let _ = ctx.producer.try_push(s);
                 }
             }
@@ -155,9 +153,7 @@ fn build_session() -> Result<Session> {
 
     // Global mono tap that excludes nothing => everything that plays out.
     let tap_desc = ca::TapDesc::with_mono_global_tap_excluding_processes(&ns::Array::new());
-    let tap = tap_desc
-        .create_process_tap()
-        .map_err(|e| anyhow!("create process tap failed: {e:?}"))?;
+    let tap = tap_desc.create_process_tap().map_err(|e| anyhow!("create process tap failed: {e:?}"))?;
     let tap_uid = tap.uid().map_err(|e| anyhow!("tap uid: {e:?}"))?;
     let asbd = tap.asbd().map_err(|e| anyhow!("tap format: {e:?}"))?;
 
@@ -174,16 +170,11 @@ fn build_session() -> Result<Session> {
     );
 
     // Sub-tap list: [{ uid: <tap uid> }]
-    let sub_tap = cf::DictionaryOf::with_keys_values(
-        &[sub_device_keys::uid()],
-        &[tap_uid.as_type_ref()],
-    );
+    let sub_tap = cf::DictionaryOf::with_keys_values(&[sub_device_keys::uid()], &[tap_uid.as_type_ref()]);
     let tap_list = cf::ArrayOf::from_slice(&[sub_tap.as_ref()]);
 
     // Use the default output device as clock source (if there is one).
-    let output_uid = ca::System::default_output_device()
-        .and_then(|d| d.uid())
-        .ok();
+    let output_uid = ca::System::default_output_device().and_then(|d| d.uid()).ok();
 
     let agg_uid = cf::Uuid::new().to_cf_string();
     let name = cf::str!(c"Hush System Tap");
@@ -191,10 +182,7 @@ fn build_session() -> Result<Session> {
     let no = cf::Boolean::value_false();
 
     let dict = if let Some(out_uid) = output_uid.as_ref() {
-        let sub_dev = cf::DictionaryOf::with_keys_values(
-            &[sub_device_keys::uid()],
-            &[out_uid.as_type_ref()],
-        );
+        let sub_dev = cf::DictionaryOf::with_keys_values(&[sub_device_keys::uid()], &[out_uid.as_type_ref()]);
         let sub_devs = cf::ArrayOf::from_slice(&[sub_dev.as_ref()]);
         cf::DictionaryOf::with_keys_values(
             &[
@@ -228,46 +216,21 @@ fn build_session() -> Result<Session> {
                 agg_keys::uid(),
                 agg_keys::tap_list(),
             ],
-            &[
-                yes,
-                no,
-                yes,
-                name.as_type_ref(),
-                agg_uid.as_type_ref(),
-                tap_list.as_type_ref(),
-            ],
+            &[yes, no, yes, name.as_type_ref(), agg_uid.as_type_ref(), tap_list.as_type_ref()],
         )
     };
 
-    let agg = AggregateDevice::with_desc(&dict)
-        .map_err(|e| anyhow!("create aggregate device failed: {e:?}"))?;
+    let agg = AggregateDevice::with_desc(&dict).map_err(|e| anyhow!("create aggregate device failed: {e:?}"))?;
 
     let rb = HeapRb::<f32>::new(sample_rate as usize * RING_SECONDS);
     let (producer, cons) = rb.split();
     let counter = Arc::new(AtomicU64::new(0));
-    let mut ctx = Box::new(IoCtx {
-        producer,
-        counter: counter.clone(),
-        channels,
-        interleaved,
-        is_float,
-        bits,
-    });
+    let mut ctx = Box::new(IoCtx { producer, counter: counter.clone(), channels, interleaved, is_float, bits });
 
-    let proc_id = agg
-        .create_io_proc_id(io_proc, Some(&mut *ctx))
-        .map_err(|e| anyhow!("create IO proc failed: {e:?}"))?;
+    let proc_id =
+        agg.create_io_proc_id(io_proc, Some(&mut *ctx)).map_err(|e| anyhow!("create IO proc failed: {e:?}"))?;
 
-    let mut session = Session {
-        tap,
-        agg,
-        proc_id,
-        started: false,
-        _ctx: ctx,
-        cons,
-        counter,
-        sample_rate,
-    };
+    let mut session = Session { tap, agg, proc_id, started: false, _ctx: ctx, cons, counter, sample_rate };
 
     // SAFETY: AudioDeviceStart on the aggregate device with our proc id.
     let status = unsafe { AudioDeviceStart(session.agg.0.0, Some(session.proc_id)) };
@@ -325,7 +288,7 @@ pub struct SystemAudioCapture {
 impl SystemAudioCapture {
     /// Start capturing all system output audio. `on_audio` receives 16 kHz mono f32 chunks
     /// (any size) on a background (non-realtime) thread.
-    pub fn start(mut on_audio: Box<dyn FnMut(&[f32]) + Send + 'static>) -> Result<Self> {
+    pub fn start(mut on_audio: crate::audio::AudioCallback) -> Result<Self> {
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
         let (init_tx, init_rx) = mpsc::sync_channel::<Result<Arc<AtomicU64>>>(1);
 
@@ -343,14 +306,9 @@ impl SystemAudioCapture {
 
                 let mut resampler = Resampler::new(session.sample_rate);
                 let mut scratch: Vec<f32> = Vec::with_capacity(8192);
-                loop {
-                    match stop_rx.recv_timeout(DRAIN_INTERVAL) {
-                        Err(mpsc::RecvTimeoutError::Timeout) => {
-                            drain(&mut session.cons, &mut scratch, &mut resampler, &mut *on_audio);
-                        }
-                        // Stop requested, or the owner vanished.
-                        Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
-                    }
+                // Runs until stop is requested or the owner vanishes.
+                while let Err(mpsc::RecvTimeoutError::Timeout) = stop_rx.recv_timeout(DRAIN_INTERVAL) {
+                    drain(&mut session.cons, &mut scratch, &mut resampler, &mut *on_audio);
                 }
 
                 // Stops the hardware first so no more samples arrive, flushes what is

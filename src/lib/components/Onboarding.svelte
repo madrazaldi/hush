@@ -161,6 +161,11 @@
               Polish dictation with <b>{app.llmName(s.dictation.llm_profile)}</b>
               <span class="faint small">(adds a second or two; plain rules are used otherwise)</span>
             </label>
+            <label class="row check">
+              <input type="checkbox" bind:checked={s.meetings.auto_enhance} onchange={() => app.save()} />
+              Write meeting notes with <b>{app.llmName(s.meetings.llm_profile)}</b> when a meeting ends
+              <span class="faint small">(sends the transcript and your notes to it)</span>
+            </label>
           {/if}
         {:else}
           <div class="hero">

@@ -29,9 +29,7 @@ fn main() {
 
         // Play a few sounds during the capture.
         for _ in 0..2 {
-            let _ = std::process::Command::new("afplay")
-                .arg("/System/Library/Sounds/Glass.aiff")
-                .spawn();
+            let _ = std::process::Command::new("afplay").arg("/System/Library/Sounds/Glass.aiff").spawn();
             std::thread::sleep(Duration::from_secs(2));
         }
 
@@ -43,10 +41,7 @@ fn main() {
 
         let n = samples.load(Ordering::Relaxed);
         let peak = f32::from_bits(peak_bits.load(Ordering::Relaxed) as u32);
-        println!(
-            "[round {round}] callbacks={cb} samples@16k={n} (~{:.2}s) peak={peak:.4}",
-            n as f64 / 16_000.0
-        );
+        println!("[round {round}] callbacks={cb} samples@16k={n} (~{:.2}s) peak={peak:.4}", n as f64 / 16_000.0);
     }
 }
 

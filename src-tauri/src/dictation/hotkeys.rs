@@ -119,11 +119,11 @@ fn run(rx: Receiver<Cmd>, handler: Handler) {
                     if let Some(m) = &manager {
                         match (on, cancel_id) {
                             (true, None) => {
-                                if let Ok(hk) = "Escape".parse::<Hotkey>() {
-                                    if let Ok(id) = m.register(hk) {
-                                        cancel_id = Some(id);
-                                        ids.insert(id, Action::Cancel);
-                                    }
+                                if let Ok(hk) = "Escape".parse::<Hotkey>()
+                                    && let Ok(id) = m.register(hk)
+                                {
+                                    cancel_id = Some(id);
+                                    ids.insert(id, Action::Cancel);
                                 }
                             }
                             (false, Some(id)) => {

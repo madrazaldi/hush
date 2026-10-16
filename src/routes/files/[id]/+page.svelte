@@ -53,7 +53,10 @@
   let translating = $state(false);
 
   async function load() {
-    rec = await api.recording(id);
+    const want = id;
+    const r = await api.recording(want);
+    if (want !== id) return; // navigated away while loading
+    rec = r;
     loaded = true;
   }
 

@@ -27,10 +27,7 @@ pub enum LlmKind {
 
 impl LlmKind {
     pub fn is_cli(self) -> bool {
-        matches!(
-            self,
-            Self::ClaudeCode | Self::Codex | Self::Opencode | Self::Gemini | Self::Antigravity
-        )
+        matches!(self, Self::ClaudeCode | Self::Codex | Self::Opencode | Self::Gemini | Self::Antigravity)
     }
 
     pub fn default_bin(self) -> &'static str {
@@ -156,13 +153,7 @@ pub struct CliStatus {
 
 /// Detect which agent CLIs are installed.
 pub async fn detect_clis() -> Vec<CliStatus> {
-    let kinds = [
-        LlmKind::ClaudeCode,
-        LlmKind::Codex,
-        LlmKind::Opencode,
-        LlmKind::Gemini,
-        LlmKind::Antigravity,
-    ];
+    let kinds = [LlmKind::ClaudeCode, LlmKind::Codex, LlmKind::Opencode, LlmKind::Gemini, LlmKind::Antigravity];
     let mut out = Vec::new();
     for kind in kinds {
         let path = crate::shell_env::which(kind.default_bin());
@@ -178,9 +169,7 @@ pub async fn detect_clis() -> Vec<CliStatus> {
 /// List models for HTTP backends (via /models) or CLIs that support listing.
 pub async fn list_models(profile: &LlmProfile) -> Result<Vec<String>> {
     match profile.kind {
-        LlmKind::OpenaiChat | LlmKind::OpenaiResponses | LlmKind::Anthropic => {
-            http::list_models(profile).await
-        }
+        LlmKind::OpenaiChat | LlmKind::OpenaiResponses | LlmKind::Anthropic => http::list_models(profile).await,
         LlmKind::Opencode => cli::opencode_models(profile).await,
         LlmKind::ClaudeCode => Ok(["haiku", "sonnet", "opus"].map(String::from).to_vec()),
         _ => Ok(vec![]),

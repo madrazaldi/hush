@@ -27,13 +27,23 @@ pub struct Progress {
 pub struct FileQueue {
     tx: mpsc::UnboundedSender<String>,
     rx: Mutex<Option<mpsc::UnboundedReceiver<String>>>,
-    cancels: Mutex<HashMap<String, CancellationToken>>,
+    /// One (generation, token) per queued or running job, created at enqueue
+    /// time so queued jobs can be cancelled too.
+    cancels: Mutex<HashMap<String, (u64, CancellationToken)>>,
+    running: Mutex<Option<(String, CancellationToken)>>,
+    generation: std::sync::atomic::AtomicU64,
 }
 
 impl Default for FileQueue {
     fn default() -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
-        Self { tx, rx: Mutex::new(Some(rx)), cancels: Mutex::new(HashMap::new()) }
+        Self {
+            tx,
+            rx: Mutex::new(Some(rx)),
+            cancels: Mutex::new(HashMap::new()),
+            running: Mutex::new(None),
+            generation: Default::default(),
+        }
     }
 }
 
@@ -50,13 +60,26 @@ impl FileQueue {
         let Some(mut rx) = self.rx.lock().take() else { return };
         tauri::async_runtime::spawn(async move {
             while let Some(id) = rx.recv().await {
-                let token = CancellationToken::new();
-                state::get().files.cancels.lock().insert(id.clone(), token.clone());
+                let files = &state::get().files;
+                // Jobs cancelled (or already run) while queued have no live token.
+                let Some((generation, token)) =
+                    files.cancels.lock().get(&id).cloned().filter(|(_, t)| !t.is_cancelled())
+                else {
+                    continue;
+                };
+                *files.running.lock() = Some((id.clone(), token.clone()));
                 let res = tokio::select! {
                     r = run_job(&id) => r,
                     _ = token.cancelled() => Err(anyhow!("Cancelled")),
                 };
-                state::get().files.cancels.lock().remove(&id);
+                *files.running.lock() = None;
+                {
+                    // Only forget our own entry: the job may have been re-queued meanwhile.
+                    let mut cancels = files.cancels.lock();
+                    if cancels.get(&id).is_some_and(|(g, _)| *g == generation) {
+                        cancels.remove(&id);
+                    }
+                }
                 if let Err(e) = res {
                     let msg = format!("{e:#}");
                     log::error!("file job {id}: {msg}");
@@ -70,12 +93,23 @@ impl FileQueue {
     pub fn enqueue(&self, id: &str) {
         let _ = state::get().db.set_status(id, "queued", 0.0, None);
         emit(id, "queued", "", 0.0, None);
+        let generation = self.generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.cancels.lock().insert(id.to_string(), (generation, CancellationToken::new()));
         let _ = self.tx.send(id.to_string());
     }
 
     pub fn cancel(&self, id: &str) {
-        if let Some(t) = self.cancels.lock().get(id) {
+        let queued = self.cancels.lock().remove(id);
+        if let Some((_, t)) = &queued {
             t.cancel();
+        }
+        // A running job reports its own cancellation; a queued one never will.
+        let running = self.running.lock().as_ref().filter(|(r, _)| r == id).map(|(_, t)| t.clone());
+        if let Some(t) = running {
+            t.cancel();
+        } else if queued.is_some() {
+            let _ = state::get().db.set_status(id, "error", 0.0, Some("Cancelled"));
+            emit(id, "error", "", 0.0, Some("Cancelled".into()));
         }
     }
 
@@ -173,7 +207,12 @@ async fn run_job(id: &str) -> Result<()> {
 
     let mut segments = transcript.segments;
     if segments.is_empty() && !transcript.text.is_empty() {
-        segments.push(Segment { start_ms: 0, end_ms: duration_ms, text: transcript.text.clone(), ..Default::default() });
+        segments.push(Segment {
+            start_ms: 0,
+            end_ms: duration_ms,
+            text: transcript.text.clone(),
+            ..Default::default()
+        });
     }
     st.db.update_recording(id, |r| {
         r.segments = segments.clone();
@@ -187,18 +226,19 @@ async fn run_job(id: &str) -> Result<()> {
     emit(id, "ready", "", 1.0, None);
 
     // 4. Optional summary.
-    if s.files.auto_summarize && !segments.is_empty() {
-        if let Some(llm_profile) = s.llm(&s.files.llm_profile) {
-            emit(id, "ready", "summarizing", 1.0, None);
-            let req = ai::summary_request(&rec.title, &segments);
-            match llm::complete_text(&llm_profile, &req).await {
-                Ok(summary) => {
-                    st.db.update_recording(id, |r| r.summary = summary)?;
-                }
-                Err(e) => log::warn!("auto-summary failed: {e:#}"),
+    if s.files.auto_summarize
+        && !segments.is_empty()
+        && let Some(llm_profile) = s.llm(&s.files.llm_profile)
+    {
+        emit(id, "ready", "summarizing", 1.0, None);
+        let req = ai::summary_request(&rec.title, &segments);
+        match llm::complete_text(&llm_profile, &req).await {
+            Ok(summary) => {
+                st.db.update_recording(id, |r| r.summary = summary)?;
             }
-            emit(id, "ready", "", 1.0, None);
+            Err(e) => log::warn!("auto-summary failed: {e:#}"),
         }
+        emit(id, "ready", "", 1.0, None);
     }
     st.emit("recording:updated", id);
     Ok(())
@@ -214,7 +254,11 @@ fn ts(ms: i64, sep: char) -> String {
 
 fn short_ts(ms: i64) -> String {
     let s = ms.max(0) / 1000;
-    if s >= 3600 { format!("{}:{:02}:{:02}", s / 3600, (s / 60) % 60, s % 60) } else { format!("{:02}:{:02}", s / 60, s % 60) }
+    if s >= 3600 {
+        format!("{}:{:02}:{:02}", s / 3600, (s / 60) % 60, s % 60)
+    } else {
+        format!("{:02}:{:02}", s / 60, s % 60)
+    }
 }
 
 fn speaker_name<'a>(rec: &'a Recording, seg: &'a Segment) -> Option<&'a str> {
@@ -234,13 +278,25 @@ fn subtitle_cues(segments: &[Segment], max_chars: usize) -> Vec<Segment> {
             for w in &s.words {
                 let len = stt::join_words(&cur).chars().count() + w.text.chars().count() + 1;
                 if !cur.is_empty() && len > max_chars * 2 {
-                    out.push(Segment { start_ms: cur[0].start_ms, end_ms: cur.last().unwrap().end_ms, text: stt::join_words(&cur), speaker: s.speaker.clone(), words: vec![] });
+                    out.push(Segment {
+                        start_ms: cur[0].start_ms,
+                        end_ms: cur.last().unwrap().end_ms,
+                        text: stt::join_words(&cur),
+                        speaker: s.speaker.clone(),
+                        words: vec![],
+                    });
                     cur.clear();
                 }
                 cur.push(w.clone());
             }
             if !cur.is_empty() {
-                out.push(Segment { start_ms: cur[0].start_ms, end_ms: cur.last().unwrap().end_ms, text: stt::join_words(&cur), speaker: s.speaker.clone(), words: vec![] });
+                out.push(Segment {
+                    start_ms: cur[0].start_ms,
+                    end_ms: cur.last().unwrap().end_ms,
+                    text: stt::join_words(&cur),
+                    speaker: s.speaker.clone(),
+                    words: vec![],
+                });
             }
             continue;
         }
@@ -278,11 +334,8 @@ fn wrap_lines(text: &str, max: usize) -> String {
     }
     // Break at the space closest to the middle.
     let mid = text.len() / 2;
-    let idx = text
-        .char_indices()
-        .filter(|(_, c)| *c == ' ')
-        .map(|(i, _)| i)
-        .min_by_key(|i| (*i as i64 - mid as i64).abs());
+    let idx =
+        text.char_indices().filter(|(_, c)| *c == ' ').map(|(i, _)| i).min_by_key(|i| (*i as i64 - mid as i64).abs());
     match idx {
         Some(i) => format!("{}\n{}", &text[..i], &text[i + 1..]),
         None => text.to_string(),
@@ -381,7 +434,11 @@ pub fn export(rec: &Recording, opts: &ExportOptions) -> Result<String> {
                     (true, Some(n)) => format!("<v {n}>{text}"),
                     _ => text,
                 };
-                out.push_str(&format!("{} --> {}\n{body}\n\n", ts(s.start_ms, '.'), ts(s.end_ms.max(s.start_ms + 500), '.')));
+                out.push_str(&format!(
+                    "{} --> {}\n{body}\n\n",
+                    ts(s.start_ms, '.'),
+                    ts(s.end_ms.max(s.start_ms + 500), '.')
+                ));
             }
             out
         }
@@ -444,7 +501,8 @@ mod tests {
 
     #[test]
     fn cues_split_long_segments() {
-        let s = Segment { start_ms: 0, end_ms: 10_000, text: "word ".repeat(60).trim().to_string(), ..Default::default() };
+        let s =
+            Segment { start_ms: 0, end_ms: 10_000, text: "word ".repeat(60).trim().to_string(), ..Default::default() };
         let cues = subtitle_cues(&[s], 42);
         assert!(cues.len() > 1);
         assert!(cues.iter().all(|c| c.text.chars().count() <= 84));

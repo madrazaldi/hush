@@ -43,9 +43,10 @@ pub async fn transcribe(
     let mut out = Transcript::default();
     for (i, (start, slice)) in chunks.into_iter().enumerate() {
         let dur_ms = samples_to_ms(slice.len());
-        let t = cx.transcribe_chunk(wav_bytes(slice, SAMPLE_RATE), dur_ms).await.map_err(|e| {
-            if total > 1 { anyhow!("{e:#} (chunk {}/{total})", i + 1) } else { e }
-        })?;
+        let t = cx
+            .transcribe_chunk(wav_bytes(slice, SAMPLE_RATE), dur_ms)
+            .await
+            .map_err(|e| if total > 1 { anyhow!("{e:#} (chunk {}/{total})", i + 1) } else { e })?;
         out.extend(t.offset(samples_to_ms(start)));
         progress((i + 1) as f32 / total as f32);
     }
@@ -191,8 +192,7 @@ async fn send(req: RequestBuilder, what: &str) -> Result<Value> {
     if !status.is_success() {
         bail!("{what} returned {status}: {}", truncate(&error_message(&body), 400));
     }
-    serde_json::from_str(&body)
-        .map_err(|e| anyhow!("{what}: unexpected response ({e}): {}", truncate(&body, 200)))
+    serde_json::from_str(&body).map_err(|e| anyhow!("{what}: unexpected response ({e}): {}", truncate(&body, 200)))
 }
 
 /// Extract a human-readable message from the various provider error shapes.
@@ -200,7 +200,9 @@ fn error_message(body: &str) -> String {
     fn find(v: &Value) -> Option<String> {
         match v {
             Value::String(s) if !s.trim().is_empty() => Some(s.trim().to_string()),
-            Value::Object(m) => ["message", "err_msg", "error", "detail", "msg"].iter().find_map(|k| m.get(*k).and_then(find)),
+            Value::Object(m) => {
+                ["message", "err_msg", "error", "detail", "msg"].iter().find_map(|k| m.get(*k).and_then(find))
+            }
             Value::Array(a) => a.iter().find_map(find),
             _ => None,
         }
@@ -268,10 +270,10 @@ fn speaker_name(raw: &str) -> Option<String> {
         return None;
     }
     let mut chars = r.chars();
-    if let (Some(c), None) = (chars.next(), chars.next()) {
-        if c.is_ascii_alphabetic() {
-            return Some(format!("Speaker {}", c.to_ascii_uppercase() as u32 - 'A' as u32 + 1));
-        }
+    if let (Some(c), None) = (chars.next(), chars.next())
+        && c.is_ascii_alphabetic()
+    {
+        return Some(format!("Speaker {}", c.to_ascii_uppercase() as u32 - 'A' as u32 + 1));
     }
     let digits = &r[r.trim_end_matches(|c: char| c.is_ascii_digit()).len()..];
     match digits.parse::<u32>() {
@@ -282,11 +284,25 @@ fn speaker_name(raw: &str) -> Option<String> {
 
 /// (ISO 639-1, ISO 639-3, English name) for the languages we normalise.
 const LANGS: &[(&str, &str, &str)] = &[
-    ("en", "eng", "English"), ("es", "spa", "Spanish"), ("fr", "fra", "French"), ("de", "deu", "German"),
-    ("it", "ita", "Italian"), ("pt", "por", "Portuguese"), ("nl", "nld", "Dutch"), ("ru", "rus", "Russian"),
-    ("zh", "zho", "Chinese"), ("ja", "jpn", "Japanese"), ("ko", "kor", "Korean"), ("ar", "ara", "Arabic"),
-    ("hi", "hin", "Hindi"), ("tr", "tur", "Turkish"), ("pl", "pol", "Polish"), ("uk", "ukr", "Ukrainian"),
-    ("sv", "swe", "Swedish"), ("vi", "vie", "Vietnamese"), ("id", "ind", "Indonesian"),
+    ("en", "eng", "English"),
+    ("es", "spa", "Spanish"),
+    ("fr", "fra", "French"),
+    ("de", "deu", "German"),
+    ("it", "ita", "Italian"),
+    ("pt", "por", "Portuguese"),
+    ("nl", "nld", "Dutch"),
+    ("ru", "rus", "Russian"),
+    ("zh", "zho", "Chinese"),
+    ("ja", "jpn", "Japanese"),
+    ("ko", "kor", "Korean"),
+    ("ar", "ara", "Arabic"),
+    ("hi", "hin", "Hindi"),
+    ("tr", "tur", "Turkish"),
+    ("pl", "pol", "Polish"),
+    ("uk", "ukr", "Ukrainian"),
+    ("sv", "swe", "Swedish"),
+    ("vi", "vie", "Vietnamese"),
+    ("id", "ind", "Indonesian"),
 ];
 
 /// Normalise "english", "eng", "en_us", "es-MX" … to a bare ISO 639-1 code when known.
@@ -478,10 +494,10 @@ impl Ctx<'_> {
         if let Some(l) = self.language().filter(|_| send_lang) {
             form = form.text("language", l);
         }
-        if matches!(mode, OaiMode::Verbose | OaiMode::Plain) {
-            if let Some(p) = oai_prompt(self.o, &vocab) {
-                form = form.text("prompt", p);
-            }
+        if matches!(mode, OaiMode::Verbose | OaiMode::Plain)
+            && let Some(p) = oai_prompt(self.o, &vocab)
+        {
+            form = form.text("prompt", p);
         }
         let path = if translate { "audio/translations" } else { "audio/transcriptions" };
         let mut req = self.http.post(format!("{base}/{path}")).multipart(form.part("file", wav_part(wav)));
@@ -500,7 +516,13 @@ fn parse_oai(v: &Value, dur_ms: i64) -> Transcript {
         .filter_map(|s| {
             let text = jstr(s, "text")?.trim();
             let (start_ms, end_ms) = span_secs(s);
-            (!text.is_empty()).then(|| Segment { start_ms, end_ms, text: text.to_string(), speaker: speaker_of(s), words: vec![] })
+            (!text.is_empty()).then(|| Segment {
+                start_ms,
+                end_ms,
+                text: text.to_string(),
+                speaker: speaker_of(s),
+                words: vec![],
+            })
         })
         .collect();
     let words: Vec<RawWord> = arr(v, "words")
@@ -686,7 +708,13 @@ fn parse_deepgram(v: &Value, dur_ms: i64) -> Transcript {
                     Some(Word { start_ms: s, end_ms: e, text: t.to_string() })
                 })
                 .collect();
-            (!text.is_empty()).then(|| Segment { start_ms, end_ms, text: text.to_string(), speaker: speaker_of(u), words })
+            (!text.is_empty()).then(|| Segment {
+                start_ms,
+                end_ms,
+                text: text.to_string(),
+                speaker: speaker_of(u),
+                words,
+            })
         })
         .collect();
     let text = alt.and_then(|a| jstr(a, "transcript"));
@@ -777,16 +805,25 @@ impl Ctx<'_> {
         let base = self.base();
         let key = self.p.api_key.trim();
         let uploaded = send(
-            self.http.post(format!("{base}/upload")).header("authorization", key).header("Content-Type", "application/octet-stream").body(wav),
+            self.http
+                .post(format!("{base}/upload"))
+                .header("authorization", key)
+                .header("Content-Type", "application/octet-stream")
+                .body(wav),
             "AssemblyAI upload",
         )
         .await?;
-        let audio_url = jstr(&uploaded, "upload_url").ok_or_else(|| anyhow!("AssemblyAI upload returned no upload_url"))?;
+        let audio_url =
+            jstr(&uploaded, "upload_url").ok_or_else(|| anyhow!("AssemblyAI upload returned no upload_url"))?;
 
         // Default (or the default model named explicitly) keeps the documented fallback chain.
         let custom_model = self.p.model.trim();
         let use_default = custom_model.is_empty() || custom_model == default_model(SttKind::Assemblyai);
-        let models = if use_default { json!([default_model(SttKind::Assemblyai), "universal-2"]) } else { json!([custom_model]) };
+        let models = if use_default {
+            json!([default_model(SttKind::Assemblyai), "universal-2"])
+        } else {
+            json!([custom_model])
+        };
         let mut body = json!({ "audio_url": audio_url, "speech_models": models });
         match self.language() {
             Some(l) => body["language_code"] = json!(l),
@@ -805,12 +842,15 @@ impl Ctx<'_> {
             body["prompt"] = json!(p); // Universal-3.5 Pro only
         }
 
-        let created = send(self.http.post(format!("{base}/transcript")).header("authorization", key).json(&body), "AssemblyAI").await?;
+        let created =
+            send(self.http.post(format!("{base}/transcript")).header("authorization", key).json(&body), "AssemblyAI")
+                .await?;
         let id = jstr(&created, "id").ok_or_else(|| anyhow!("AssemblyAI returned no transcript id"))?.to_string();
         let started = Instant::now();
         loop {
             tokio::time::sleep(ASSEMBLY_POLL).await;
-            let v = send(self.http.get(format!("{base}/transcript/{id}")).header("authorization", key), "AssemblyAI").await?;
+            let v = send(self.http.get(format!("{base}/transcript/{id}")).header("authorization", key), "AssemblyAI")
+                .await?;
             match jstr(&v, "status") {
                 Some("completed") => return Ok(parse_assembly(&v, dur_ms)),
                 Some("error") => {
@@ -821,7 +861,9 @@ impl Ctx<'_> {
                     }
                     bail!("AssemblyAI transcription failed: {}", truncate(msg, 400));
                 }
-                _ if started.elapsed() > ASSEMBLY_TIMEOUT => bail!("AssemblyAI transcription timed out after 30 minutes"),
+                _ if started.elapsed() > ASSEMBLY_TIMEOUT => {
+                    bail!("AssemblyAI transcription timed out after 30 minutes")
+                }
                 _ => {}
             }
         }
@@ -842,7 +884,13 @@ fn parse_assembly(v: &Value, dur_ms: i64) -> Transcript {
                     Some(Word { start_ms: s, end_ms: e, text: jstr(w, "text")?.trim().to_string() })
                 })
                 .collect();
-            (!text.is_empty()).then(|| Segment { start_ms, end_ms, text: text.to_string(), speaker: speaker_of(u), words })
+            (!text.is_empty()).then(|| Segment {
+                start_ms,
+                end_ms,
+                text: text.to_string(),
+                speaker: speaker_of(u),
+                words,
+            })
         })
         .collect();
     let text = jstr(v, "text");
@@ -898,7 +946,7 @@ mod tests {
         let segs = group_words(vec![
             rw("Hello", 0, 400, Some("Speaker 1")),
             rw("there.", 450, 900, Some("Speaker 1")),
-            rw("Hi", 950, 1200, Some("Speaker 2")), // speaker change
+            rw("Hi", 950, 1200, Some("Speaker 2")),     // speaker change
             rw("again", 3000, 3400, Some("Speaker 2")), // gap > 0.8 s
         ]);
         let texts: Vec<_> = segs.iter().map(|s| s.text.as_str()).collect();
@@ -912,9 +960,8 @@ mod tests {
     #[test]
     fn long_segments_break_only_at_sentence_end() {
         // 40 words, 0.3 s each, contiguous; a period after word 35.
-        let words: Vec<_> = (0..40)
-            .map(|i| rw(if i == 34 { "end." } else { "word" }, i * 300, i * 300 + 280, None))
-            .collect();
+        let words: Vec<_> =
+            (0..40).map(|i| rw(if i == 34 { "end." } else { "word" }, i * 300, i * 300 + 280, None)).collect();
         let segs = group_words(words);
         assert_eq!(segs.len(), 2);
         assert_eq!(segs[0].words.len(), 35);
@@ -1055,13 +1102,13 @@ mod tests {
     #[test]
     fn parses_deepgram_utterances() {
         let v = json!({"results": {
-            "channels": [{"detected_language": "en", "alternatives": [{"transcript": "hello there hi", "words": []}]}],
-            "utterances": [
-                {"start": 0.1, "end": 1.0, "transcript": "Hello there.", "speaker": 0, "words": [
-                    {"word": "hello", "punctuated_word": "Hello", "start": 0.1, "end": 0.5, "speaker": 0},
-                    {"word": "there", "punctuated_word": "there.", "start": 0.5, "end": 1.0, "speaker": 0}]},
-                {"start": 1.5, "end": 2.0, "transcript": "Hi.", "speaker": 1, "words": []}
-            ]}});
+        "channels": [{"detected_language": "en", "alternatives": [{"transcript": "hello there hi", "words": []}]}],
+        "utterances": [
+            {"start": 0.1, "end": 1.0, "transcript": "Hello there.", "speaker": 0, "words": [
+                {"word": "hello", "punctuated_word": "Hello", "start": 0.1, "end": 0.5, "speaker": 0},
+                {"word": "there", "punctuated_word": "there.", "start": 0.5, "end": 1.0, "speaker": 0}]},
+            {"start": 1.5, "end": 2.0, "transcript": "Hi.", "speaker": 1, "words": []}
+        ]}});
         let t = parse_deepgram(&v, 2000);
         assert_eq!(t.language.as_deref(), Some("en"));
         assert_eq!(t.segments.len(), 2);
@@ -1079,7 +1126,11 @@ mod tests {
         assert_eq!(t.segments.len(), 1);
         assert_eq!(t.segments[0].text, "hello there");
         assert_eq!(t.language, None);
-        assert!(parse_deepgram(&json!({"results": {"channels": [{"alternatives": [{"transcript": ""}]}]}}), 1000).segments.is_empty());
+        assert!(
+            parse_deepgram(&json!({"results": {"channels": [{"alternatives": [{"transcript": ""}]}]}}), 1000)
+                .segments
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1107,10 +1158,10 @@ mod tests {
     #[test]
     fn parses_assemblyai_utterances_and_words() {
         let v = json!({"status": "completed", "text": "Hello. Hi.", "language_code": "en_us",
-            "utterances": [
-                {"start": 250, "end": 900, "text": "Hello.", "speaker": "A", "words": [{"text": "Hello.", "start": 250, "end": 900, "speaker": "A"}]},
-                {"start": 1200, "end": 1500, "text": "Hi.", "speaker": "B", "words": []}
-            ]});
+        "utterances": [
+            {"start": 250, "end": 900, "text": "Hello.", "speaker": "A", "words": [{"text": "Hello.", "start": 250, "end": 900, "speaker": "A"}]},
+            {"start": 1200, "end": 1500, "text": "Hi.", "speaker": "B", "words": []}
+        ]});
         let t = parse_assembly(&v, 2000);
         assert_eq!(t.language.as_deref(), Some("en"));
         assert_eq!(t.segments.len(), 2);
@@ -1129,7 +1180,14 @@ mod tests {
 
     #[test]
     fn defaults_exist_for_cloud_kinds() {
-        for k in [SttKind::OpenaiCompatible, SttKind::Xai, SttKind::Muse, SttKind::Deepgram, SttKind::Elevenlabs, SttKind::Assemblyai] {
+        for k in [
+            SttKind::OpenaiCompatible,
+            SttKind::Xai,
+            SttKind::Muse,
+            SttKind::Deepgram,
+            SttKind::Elevenlabs,
+            SttKind::Assemblyai,
+        ] {
             assert!(!default_model(k).is_empty() && default_base_url(k).starts_with("https://"));
             assert!(max_chunk_secs(k) <= 30 * 60);
         }

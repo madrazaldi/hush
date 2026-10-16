@@ -590,4 +590,11 @@ svg.lucide {
 }
 .prose input[type="checkbox"] {
   accent-color: var(--ember);
+  margin: 0 0.5em 0 0;
+  vertical-align: -0.1em;
+}
+/* GFM task lists: the checkbox replaces the bullet */
+.prose li:has(> input[type="checkbox"]:first-child) {
+  list-style: none;
+  margin-left: -1.3em;
 }

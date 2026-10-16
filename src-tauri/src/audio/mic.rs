@@ -33,10 +33,10 @@ pub fn list_input_devices() -> Vec<InputDevice> {
 fn pick_device(name: Option<&str>) -> Result<cpal::Device> {
     let host = cpal::default_host();
     if let Some(want) = name.filter(|n| !n.is_empty()) {
-        if let Ok(mut devs) = host.input_devices() {
-            if let Some(d) = devs.find(|d| d.description().map(|x| x.name() == want).unwrap_or(false)) {
-                return Ok(d);
-            }
+        if let Ok(mut devs) = host.input_devices()
+            && let Some(d) = devs.find(|d| d.description().map(|x| x.name() == want).unwrap_or(false))
+        {
+            return Ok(d);
         }
         log::warn!("input device {want:?} not found, using default");
     }
@@ -57,7 +57,7 @@ pub struct MicCapture {
 impl MicCapture {
     /// Start capturing. `on_audio` receives 16 kHz mono chunks on a worker thread.
     /// Returns once the device is actually running.
-    pub fn start(device: Option<&str>, mut on_audio: Box<dyn FnMut(&[f32]) + Send + 'static>) -> Result<Self> {
+    pub fn start(device: Option<&str>, mut on_audio: crate::audio::AudioCallback) -> Result<Self> {
         let device = device.map(str::to_string);
         let (ready_tx, ready_rx) = mpsc::channel::<Result<String>>();
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
@@ -78,7 +78,14 @@ impl MicCapture {
                 let stream = match cfg.sample_format() {
                     cpal::SampleFormat::F32 => {
                         let tx = tx.clone();
-                        dev.build_input_stream::<f32, _, _>(stream_cfg, move |d, _| { let _ = tx.send(Msg::Audio(to_mono(d, channels))); }, on_err, None)
+                        dev.build_input_stream::<f32, _, _>(
+                            stream_cfg,
+                            move |d, _| {
+                                let _ = tx.send(Msg::Audio(to_mono(d, channels)));
+                            },
+                            on_err,
+                            None,
+                        )
                     }
                     cpal::SampleFormat::I16 => {
                         let tx = tx.clone();
@@ -118,10 +125,14 @@ impl MicCapture {
                     return;
                 }
             };
-            let _ = ready_tx.send(Ok(name));
+            // If `start` already gave up waiting, nobody owns this capture: stop now.
+            if ready_tx.send(Ok(name)).is_err() {
+                return;
+            }
             let mut resampler = Resampler::new(rate);
             loop {
-                if stop_rx.try_recv().is_ok() {
+                // A dropped sender (owner gone without calling stop) also ends capture.
+                if !matches!(stop_rx.try_recv(), Err(mpsc::TryRecvError::Empty)) {
                     break;
                 }
                 match rx.recv_timeout(Duration::from_millis(50)) {

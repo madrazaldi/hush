@@ -136,7 +136,10 @@ pub async fn download_model(id: String) -> CmdResult<()> {
         state::get().emit("model:progress", serde_json::json!({"id": id2, "progress": p}));
     })
     .await;
-    state::get().emit("model:progress", serde_json::json!({"id": id, "progress": if res.is_ok() { 1.0 } else { -1.0 }, "done": true}));
+    state::get().emit(
+        "model:progress",
+        serde_json::json!({"id": id, "progress": if res.is_ok() { 1.0 } else { -1.0 }, "done": true}),
+    );
     res.s()
 }
 
@@ -153,7 +156,9 @@ pub fn delete_model(id: String) -> CmdResult<()> {
 #[tauri::command]
 pub async fn test_stt(profile: SttProfile) -> CmdResult<String> {
     match profile.kind {
-        stt::SttKind::Local => tokio::task::spawn_blocking(move || stt::local::describe(&profile.model)).await.map_err(err)?.s(),
+        stt::SttKind::Local => {
+            tokio::task::spawn_blocking(move || stt::local::describe(&profile.model)).await.map_err(err)?.s()
+        }
         _ => stt::cloud::test_profile(&profile).await.s(),
     }
 }
@@ -166,7 +171,10 @@ pub async fn detect_clis() -> Vec<llm::CliStatus> {
 #[tauri::command]
 pub async fn test_llm(profile: LlmProfile) -> CmdResult<String> {
     let start = std::time::Instant::now();
-    let req = llm::ChatRequest::simple("You are a connectivity check. Follow instructions exactly.", "Reply with exactly: OK");
+    let req = llm::ChatRequest::simple(
+        "You are a connectivity check. Follow instructions exactly.",
+        "Reply with exactly: OK",
+    );
     let out = llm::complete_text(&profile, &req).await.s()?;
     Ok(format!("{} ({:.1}s)", out.chars().take(40).collect::<String>(), start.elapsed().as_secs_f32()))
 }
@@ -220,7 +228,8 @@ pub async fn apply_style(text: String, style_id: String) -> CmdResult<String> {
     }
     if !style.prompt.trim().is_empty() {
         let profile = s.llm(&s.dictation.llm_profile).ok_or("Add an AI provider first")?;
-        let req = ai::dictation_request(&style, &t, &ai::DictationContext { app_name: None, vocabulary: &s.vocabulary });
+        let req =
+            ai::dictation_request(&style, &t, &ai::DictationContext { app_name: None, vocabulary: &s.vocabulary });
         t = llm::complete_text(&profile, &req).await.s()?;
     }
     Ok(ai::rules::apply_replacements(&t, &s.replacements))
@@ -298,16 +307,16 @@ pub fn update_recording(id: String, patch: RecordingPatch) -> CmdResult<Option<R
             if let Some(v) = patch.stt {
                 r.stt = Some(v);
             }
-            if let Some((i, text)) = patch.segment_edit {
-                if let Some(seg) = r.segments.get_mut(i) {
-                    seg.text = text;
-                    seg.words.clear();
-                }
+            if let Some((i, text)) = patch.segment_edit
+                && let Some(seg) = r.segments.get_mut(i)
+            {
+                seg.text = text;
+                seg.words.clear();
             }
-            if let Some((i, sp)) = patch.segment_speaker {
-                if let Some(seg) = r.segments.get_mut(i) {
-                    seg.speaker = Some(sp).filter(|s| !s.is_empty());
-                }
+            if let Some((i, sp)) = patch.segment_speaker
+                && let Some(seg) = r.segments.get_mut(i)
+            {
+                seg.speaker = Some(sp).filter(|s| !s.is_empty());
             }
         })
         .s()?;
@@ -319,13 +328,17 @@ pub fn delete_recording(id: String) -> CmdResult<()> {
     let st = state::get();
     st.files.cancel(&id);
     if let Some(rec) = st.db.delete_recording(&id).s()? {
-        // Only delete media we own (downloads, meeting audio), never the user's source file.
+        // Only delete media we own (downloads, meeting audio), never the user's
+        // source file, and nothing another recording (e.g. a translation) still uses.
+        let unused = |p: &PathBuf| !st.db.media_in_use(&p.to_string_lossy()).unwrap_or(true);
         let owned = |p: &Option<String>| p.as_ref().map(PathBuf::from).filter(|p| p.starts_with(crate::paths::root()));
         for p in [owned(&rec.media_path), owned(&rec.audio_path)].into_iter().flatten() {
-            let _ = std::fs::remove_file(p);
+            if unused(&p) {
+                let _ = std::fs::remove_file(p);
+            }
         }
         let dir = crate::paths::audio_dir().join(&rec.id);
-        if dir.is_dir() {
+        if dir.is_dir() && unused(&dir) {
             let _ = std::fs::remove_dir_all(dir);
         }
     }
@@ -539,7 +552,9 @@ pub fn meeting_create(title: Option<String>) -> CmdResult<Recording> {
     let rec = Recording {
         id: uuid::Uuid::new_v4().to_string(),
         kind: "meeting".into(),
-        title: title.filter(|t| !t.trim().is_empty()).unwrap_or_else(|| format!("Meeting {}", chrono::Local::now().format("%b %-d, %H:%M"))),
+        title: title
+            .filter(|t| !t.trim().is_empty())
+            .unwrap_or_else(|| format!("Meeting {}", chrono::Local::now().format("%b %-d, %H:%M"))),
         created_at: crate::db::now_ms(),
         status: "ready".into(),
         template_id: Some(s.meetings.default_template.clone()),

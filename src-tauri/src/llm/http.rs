@@ -7,10 +7,7 @@ use super::sse::for_each_event;
 use super::{ChatRequest, DeltaFn, LlmProfile, Role};
 
 fn client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(20))
-        .build()
-        .expect("reqwest client")
+    reqwest::Client::builder().connect_timeout(std::time::Duration::from_secs(20)).build().expect("reqwest client")
 }
 
 fn base(profile: &LlmProfile, default: &str) -> String {

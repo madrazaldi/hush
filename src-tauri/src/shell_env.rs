@@ -53,9 +53,7 @@ fn login_shell_path() -> Option<String> {
     loop {
         match child.try_wait() {
             Ok(Some(_)) => break,
-            Ok(None) if std::time::Instant::now() < deadline => {
-                std::thread::sleep(Duration::from_millis(25))
-            }
+            Ok(None) if std::time::Instant::now() < deadline => std::thread::sleep(Duration::from_millis(25)),
             _ => {
                 let _ = child.kill();
                 return None;

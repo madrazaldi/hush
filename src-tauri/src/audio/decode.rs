@@ -19,8 +19,8 @@ use crate::stt::SAMPLE_RATE;
 const SYMPHONIA_EXTS: &[&str] = &["wav", "mp3", "flac", "m4a", "aac", "ogg", "oga", "aiff", "aif", "caf"];
 
 pub const MEDIA_EXTS: &[&str] = &[
-    "wav", "mp3", "flac", "m4a", "aac", "ogg", "oga", "opus", "aiff", "aif", "caf", "wma", "amr", "webm", "mp4",
-    "m4v", "mov", "mkv", "avi", "wmv", "flv", "mpg", "mpeg", "3gp",
+    "wav", "mp3", "flac", "m4a", "aac", "ogg", "oga", "opus", "aiff", "aif", "caf", "wma", "amr", "webm", "mp4", "m4v",
+    "mov", "mkv", "avi", "wmv", "flv", "mpg", "mpeg", "3gp",
 ];
 
 pub const VIDEO_EXTS: &[&str] = &["mp4", "m4v", "mov", "mkv", "avi", "wmv", "flv", "mpg", "mpeg", "3gp", "webm"];
@@ -57,7 +57,8 @@ fn decode_symphonia(path: &Path) -> Result<Vec<f32>> {
     if let Some(e) = ext(path) {
         hint.with_extension(&e);
     }
-    let probed = symphonia::default::get_probe().format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())?;
+    let probed =
+        symphonia::default::get_probe().format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())?;
     let mut format = probed.format;
     let track = format
         .tracks()
@@ -112,7 +113,7 @@ fn decode_ffmpeg(path: &Path) -> Result<Vec<f32>> {
     if !out.status.success() {
         bail!("ffmpeg failed: {}", String::from_utf8_lossy(&out.stderr).trim());
     }
-    Ok(out.stdout.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect())
+    Ok(out.stdout.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect())
 }
 
 pub struct Downloaded {
@@ -120,28 +121,66 @@ pub struct Downloaded {
     pub title: String,
 }
 
+/// Removes every file in `dir` named `<stem>.*` on drop unless disarmed, so
+/// failed or cancelled downloads don't leave partial files behind.
+struct PartialFiles<'a> {
+    dir: &'a Path,
+    stem: String,
+    armed: bool,
+}
+
+impl Drop for PartialFiles<'_> {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let prefix = format!("{}.", self.stem);
+        for e in std::fs::read_dir(self.dir).into_iter().flatten().flatten() {
+            if e.file_name().to_string_lossy().starts_with(&prefix) {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+}
+
 /// Download the audio track of a URL (YouTube, podcasts, …) with yt-dlp.
 pub async fn download_url(url: &str, dest_dir: &Path) -> Result<Downloaded> {
+    let mut partial = PartialFiles { dir: dest_dir, stem: uuid::Uuid::new_v4().to_string(), armed: true };
     // Direct links to media files don't need yt-dlp.
     let lower = url.to_lowercase();
     let path_part = lower.split(['?', '#']).next().unwrap_or("");
     if let Some(e) = MEDIA_EXTS.iter().find(|e| path_part.ends_with(&format!(".{e}"))) {
         let resp = reqwest::get(url).await?.error_for_status()?;
         let name = path_part.rsplit('/').next().unwrap_or("download").to_string();
-        let dest = dest_dir.join(format!("{}.{e}", uuid::Uuid::new_v4()));
+        let dest = dest_dir.join(format!("{}.{e}", partial.stem));
         tokio::fs::write(&dest, resp.bytes().await?).await?;
+        partial.armed = false;
         return Ok(Downloaded { path: dest, title: name });
     }
 
     let ytdlp = shell_env::which("yt-dlp")
         .ok_or_else(|| anyhow!("Importing from links needs yt-dlp. Install it with `brew install yt-dlp`."))?;
-    let template = dest_dir.join(format!("{}.%(ext)s", uuid::Uuid::new_v4()));
+    let template = dest_dir.join(format!("{}.%(ext)s", partial.stem));
     let out = tokio::process::Command::new(ytdlp)
-        .args(["--no-playlist", "--no-progress", "-f", "bestaudio/best", "--print", "title", "--print", "after_move:filepath", "-o"])
+        .args([
+            "--no-playlist",
+            "--no-progress",
+            "-f",
+            "bestaudio/best",
+            "--print",
+            "title",
+            "--print",
+            "after_move:filepath",
+            "-o",
+        ])
         .arg(&template)
+        // `--` so a URL can never be parsed as an option.
+        .arg("--")
         .arg(url)
         .env("PATH", shell_env::path())
         .stdin(Stdio::null())
+        // Cancelling the job drops this future; take yt-dlp down with it.
+        .kill_on_drop(true)
         .output()
         .await
         .context("running yt-dlp")?;
@@ -152,5 +191,6 @@ pub async fn download_url(url: &str, dest_dir: &Path) -> Result<Downloaded> {
     let lines: Vec<&str> = stdout.lines().filter(|l| !l.trim().is_empty()).collect();
     let path = lines.last().map(|p| PathBuf::from(p.trim())).ok_or_else(|| anyhow!("yt-dlp gave no file"))?;
     let title = if lines.len() >= 2 { lines[0].trim().to_string() } else { url.to_string() };
+    partial.armed = false;
     Ok(Downloaded { path, title })
 }

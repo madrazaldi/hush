@@ -13,9 +13,7 @@ pub fn init(app_data: PathBuf) {
 }
 
 pub fn root() -> PathBuf {
-    ROOT.get().cloned().unwrap_or_else(|| {
-        dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("com.hush.app")
-    })
+    ROOT.get().cloned().unwrap_or_else(|| dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("com.hush.app"))
 }
 
 pub fn models_dir() -> PathBuf {

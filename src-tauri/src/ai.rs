@@ -54,7 +54,20 @@ pub fn builtin_styles() -> Vec<Style> {
             "The text is an instruction for an AI assistant or a technical note in a code editor or terminal. \
              Make it clear and precise. Preserve technical terms, file names, identifiers, commands and code \
              exactly; format code identifiers in `backticks` when obvious. Do not answer or execute the request.",
-            &["Cursor", "Code", "Visual Studio Code", "Zed", "Xcode", "Terminal", "iTerm2", "Ghostty", "Warp", "ChatGPT", "Claude", "T3 Code"],
+            &[
+                "Cursor",
+                "Code",
+                "Visual Studio Code",
+                "Zed",
+                "Xcode",
+                "Terminal",
+                "iTerm2",
+                "Ghostty",
+                "Warp",
+                "ChatGPT",
+                "Claude",
+                "T3 Code",
+            ],
         ),
         style(
             "formal",
@@ -67,7 +80,13 @@ pub fn builtin_styles() -> Vec<Style> {
 }
 
 fn template(id: &str, name: &str, description: &str, prompt: &str) -> NoteTemplate {
-    NoteTemplate { id: id.into(), name: name.into(), description: description.into(), prompt: prompt.into(), builtin: true }
+    NoteTemplate {
+        id: id.into(),
+        name: name.into(),
+        description: description.into(),
+        prompt: prompt.into(),
+        builtin: true,
+    }
 }
 
 pub fn builtin_templates() -> Vec<NoteTemplate> {
@@ -129,12 +148,36 @@ fn recipe(id: &str, name: &str, prompt: &str) -> Recipe {
 
 pub fn builtin_recipes() -> Vec<Recipe> {
     vec![
-        recipe("follow-up", "Write follow-up email", "Draft a concise follow-up email to the other participants: thank them, recap decisions, list action items with owners and dates, and propose next steps. Plain text, ready to paste."),
-        recipe("actions", "List action items", "List every action item as a Markdown checklist: `- [ ] Owner — task (due date)`. Include implicit commitments (\"I'll send that over\"). Group by owner."),
-        recipe("exec-summary", "Executive summary", "Write a 5-bullet executive summary for someone who missed the meeting: outcome, decisions, risks, asks, next steps."),
-        recipe("decisions", "Decision log", "Extract every decision made, with the reasoning given and any alternatives that were rejected. Table: Decision | Why | Alternatives rejected | Owner."),
-        recipe("questions", "Open questions", "List unresolved questions and disagreements, who raised them, and what would resolve them."),
-        recipe("coach", "Coach me", "Give me candid feedback on how I (\"Me\") communicated in this meeting: clarity, listening, talk-time balance, and two specific things to do better next time, citing moments from the transcript."),
+        recipe(
+            "follow-up",
+            "Write follow-up email",
+            "Draft a concise follow-up email to the other participants: thank them, recap decisions, list action items with owners and dates, and propose next steps. Plain text, ready to paste.",
+        ),
+        recipe(
+            "actions",
+            "List action items",
+            "List every action item as a Markdown checklist: `- [ ] Owner — task (due date)`. Include implicit commitments (\"I'll send that over\"). Group by owner.",
+        ),
+        recipe(
+            "exec-summary",
+            "Executive summary",
+            "Write a 5-bullet executive summary for someone who missed the meeting: outcome, decisions, risks, asks, next steps.",
+        ),
+        recipe(
+            "decisions",
+            "Decision log",
+            "Extract every decision made, with the reasoning given and any alternatives that were rejected. Table: Decision | Why | Alternatives rejected | Owner.",
+        ),
+        recipe(
+            "questions",
+            "Open questions",
+            "List unresolved questions and disagreements, who raised them, and what would resolve them.",
+        ),
+        recipe(
+            "coach",
+            "Coach me",
+            "Give me candid feedback on how I (\"Me\") communicated in this meeting: clarity, listening, talk-time balance, and two specific things to do better next time, citing moments from the transcript.",
+        ),
     ]
 }
 
@@ -176,12 +219,19 @@ pub fn command_request(instruction: &str, selected: &str, app: Option<&str>) -> 
     if let Some(app) = app.filter(|a| !a.is_empty()) {
         system.push_str(&format!(" The text lives in the app \"{app}\"."));
     }
-    ChatRequest::simple(system, format!("<instruction>{instruction}</instruction>\n<selection>\n{selected}\n</selection>"))
+    ChatRequest::simple(
+        system,
+        format!("<instruction>{instruction}</instruction>\n<selection>\n{selected}\n</selection>"),
+    )
 }
 
 fn fmt_ts(ms: i64) -> String {
     let s = ms / 1000;
-    if s >= 3600 { format!("{}:{:02}:{:02}", s / 3600, (s / 60) % 60, s % 60) } else { format!("{:02}:{:02}", s / 60, s % 60) }
+    if s >= 3600 {
+        format!("{}:{:02}:{:02}", s / 3600, (s / 60) % 60, s % 60)
+    } else {
+        format!("{:02}:{:02}", s / 60, s % 60)
+    }
 }
 
 /// Transcript rendered for LLM context: `[mm:ss] Speaker: text`.
@@ -220,7 +270,8 @@ pub fn enhance_request(tpl: &NoteTemplate, user_notes: &str, segments: &[Segment
          Markdown only — no preamble, no title line (the app shows the title).\n\nTemplate — {}:\n{}",
         tpl.name, tpl.prompt
     );
-    let notes = if user_notes.trim().is_empty() { "(no notes taken)".to_string() } else { user_notes.trim().to_string() };
+    let notes =
+        if user_notes.trim().is_empty() { "(no notes taken)".to_string() } else { user_notes.trim().to_string() };
     let user = format!(
         "Meeting: {}\nDate: {}\nDuration: {} min\n\n<my_notes>\n{}\n</my_notes>\n\n<transcript>\n{}\n</transcript>",
         info.title,
@@ -238,7 +289,10 @@ pub fn summary_request(title: &str, segments: &[Segment]) -> ChatRequest {
     let system = "Summarize this transcript in Markdown: a 2–3 sentence overview, then ## Key points (bullets), then \
                   ## Chapters with `[mm:ss] Title` lines marking topic changes, then ## Action items if any. \
                   Write in the transcript's language. Output only the Markdown.";
-    ChatRequest::simple(system, format!("Title: {title}\n\n<transcript>\n{}\n</transcript>", transcript_for_llm(segments)))
+    ChatRequest::simple(
+        system,
+        format!("Title: {title}\n\n<transcript>\n{}\n</transcript>", transcript_for_llm(segments)),
+    )
 }
 
 pub fn title_request(text: &str) -> ChatRequest {
@@ -250,7 +304,13 @@ pub fn title_request(text: &str) -> ChatRequest {
 }
 
 /// Chat over a transcript (and optionally notes). `history` is the prior turns.
-pub fn chat_request(title: &str, segments: &[Segment], notes: &str, history: &[ChatMessage], question: &str) -> ChatRequest {
+pub fn chat_request(
+    title: &str,
+    segments: &[Segment],
+    notes: &str,
+    history: &[ChatMessage],
+    question: &str,
+) -> ChatRequest {
     let mut system = format!(
         "You answer questions about a recording titled \"{title}\". Ground every answer in the transcript; cite \
          timestamps like [12:34] when referring to moments. If the answer isn't in the transcript, say so. \
@@ -281,18 +341,23 @@ pub mod rules {
 
     const FILLERS: &[&str] = &["um", "uh", "uhm", "umm", "erm", "er", "ah", "hmm", "mm", "mhm"];
 
+    /// Remove filler words and stutters. Works line by line so line breaks
+    /// produced by spoken commands ("new paragraph") survive.
     pub fn remove_fillers(text: &str) -> String {
+        text.split('\n').map(remove_fillers_line).collect::<Vec<_>>().join("\n")
+    }
+
+    fn remove_fillers_line(text: &str) -> String {
         let mut out: Vec<String> = Vec::new();
         for raw in text.split_whitespace() {
             let core = raw.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
             if FILLERS.contains(&core.as_str()) {
                 // Preserve sentence punctuation attached to the filler.
-                if let Some(p) = raw.chars().last().filter(|c| matches!(c, '.' | '?' | '!')) {
-                    if let Some(prev) = out.last_mut() {
-                        if !prev.ends_with(['.', '?', '!', ',']) {
-                            prev.push(p);
-                        }
-                    }
+                if let Some(p) = raw.chars().last().filter(|c| matches!(c, '.' | '?' | '!'))
+                    && let Some(prev) = out.last_mut()
+                    && !prev.ends_with(['.', '?', '!', ','])
+                {
+                    prev.push(p);
                 }
                 continue;
             }
@@ -365,14 +430,10 @@ pub mod rules {
     /// Spoken formatting commands that work even without an LLM.
     pub fn spoken_commands(text: &str) -> String {
         let mut s = text.to_string();
-        for (from, to) in [
-            ("new paragraph", "\n\n"),
-            ("new line", "\n"),
-            ("newline", "\n"),
-        ] {
+        for (from, to) in [("new paragraph", "\n\n"), ("new line", "\n"), ("newline", "\n")] {
             s = replace_word_ci(&s, from, to);
         }
-        s.replace(" \n", "\n").replace("\n ", "\n").replace(".\n", ".\n").trim().to_string()
+        s.replace(" \n", "\n").replace("\n ", "\n").trim().to_string()
     }
 
     #[cfg(test)]
@@ -382,6 +443,12 @@ pub mod rules {
         #[test]
         fn fillers() {
             assert_eq!(remove_fillers("um so I think uh the the plan works"), "So I think the plan works");
+        }
+
+        #[test]
+        fn fillers_keep_spoken_line_breaks() {
+            let text = remove_fillers(&spoken_commands("hello um new paragraph uh world new line done"));
+            assert_eq!(text, "Hello\n\nWorld\nDone");
         }
 
         #[test]

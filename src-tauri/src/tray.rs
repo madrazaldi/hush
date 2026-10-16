@@ -25,7 +25,15 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let quit = MenuItem::with_id(app, "quit", "Quit Hush", true, Some("CmdOrCtrl+Q"))?;
     Menu::with_items(
         app,
-        &[&dictate, &meeting, &PredefinedMenuItem::separator(app)?, &open, &settings, &PredefinedMenuItem::separator(app)?, &quit],
+        &[
+            &dictate,
+            &meeting,
+            &PredefinedMenuItem::separator(app)?,
+            &open,
+            &settings,
+            &PredefinedMenuItem::separator(app)?,
+            &quit,
+        ],
     )
 }
 

@@ -138,7 +138,12 @@ fn convert(t: transcribe_cpp::Transcript) -> Transcript {
     Transcript { text: t.text.trim().to_string(), language: t.language.filter(|l| !l.is_empty()), segments }
 }
 
-fn transcribe_blocking(id: &str, pcm: &[f32], opts: &SttOptions, progress: &(dyn Fn(f32) + Send + Sync)) -> Result<Transcript> {
+fn transcribe_blocking(
+    id: &str,
+    pcm: &[f32],
+    opts: &SttOptions,
+    progress: &(dyn Fn(f32) + Send + Sync),
+) -> Result<Transcript> {
     let loaded = load(id)?;
     let ro = run_options(&loaded.model, opts);
     let mut session = loaded.session.lock();
@@ -172,7 +177,12 @@ fn transcribe_blocking(id: &str, pcm: &[f32], opts: &SttOptions, progress: &(dyn
         let chunk_ms = (chunk.len() as i64) * 1000 / SAMPLE_RATE as i64;
         let mut piece = convert(res);
         if piece.segments.is_empty() && !piece.text.is_empty() {
-            piece.segments.push(Segment { start_ms: 0, end_ms: chunk_ms, text: piece.text.clone(), ..Default::default() });
+            piece.segments.push(Segment {
+                start_ms: 0,
+                end_ms: chunk_ms,
+                text: piece.text.clone(),
+                ..Default::default()
+            });
         }
         // Models without timestamps (Moonshine, SenseVoice) report zero-length
         // segments; spread untimed ones across the chunk so seeking still works.
@@ -189,7 +199,12 @@ fn transcribe_blocking(id: &str, pcm: &[f32], opts: &SttOptions, progress: &(dyn
     Ok(out)
 }
 
-pub async fn transcribe(model_id: &str, pcm: &[f32], opts: &SttOptions, progress: &(dyn Fn(f32) + Send + Sync)) -> Result<Transcript> {
+pub async fn transcribe(
+    model_id: &str,
+    pcm: &[f32],
+    opts: &SttOptions,
+    progress: &(dyn Fn(f32) + Send + Sync),
+) -> Result<Transcript> {
     // The engine is synchronous; run it off the async runtime. Progress is
     // forwarded through a channel since the callback isn't 'static.
     let id = model_id.to_string();

@@ -14,7 +14,16 @@ async fn main() -> anyhow::Result<()> {
         if cli.path.is_none() {
             continue;
         }
-        let profile = llm::LlmProfile { id: "t".into(), name: "t".into(), kind: cli.kind, model: String::new(), base_url: String::new(), api_key: String::new(), bin_path: String::new(), effort: String::new() };
+        let profile = llm::LlmProfile {
+            id: "t".into(),
+            name: "t".into(),
+            kind: cli.kind,
+            model: String::new(),
+            base_url: String::new(),
+            api_key: String::new(),
+            bin_path: String::new(),
+            effort: String::new(),
+        };
         let t = Instant::now();
         match llm::complete_text(&profile, &req).await {
             Ok(out) => println!("  -> {out:?} ({:?})", t.elapsed()),
