@@ -4,7 +4,7 @@
 //! GGUF takes a second or two, which would ruin dictation latency.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock};
 
 use anyhow::{Result, anyhow};
@@ -28,6 +28,10 @@ const CACHE_SIZE: usize = 2;
 const DEFAULT_CHUNK_MS: i64 = 120_000;
 
 fn load(id: &str) -> Result<Arc<Loaded>> {
+    let _in_flight = InFlight::enter();
+    if SHUTTING_DOWN.load(Ordering::SeqCst) {
+        return Err(anyhow!("Hush is quitting"));
+    }
     {
         let mut cache = CACHE.lock();
         if let Some(pos) = cache.iter().position(|l| l.id == id) {
@@ -42,6 +46,10 @@ fn load(id: &str) -> Result<Arc<Loaded>> {
     let session = model.session().map_err(|e| anyhow!("failed to create session: {e}"))?;
     let loaded = Arc::new(Loaded { id: id.to_string(), model, session: Mutex::new(session) });
     let mut cache = CACHE.lock();
+    // Don't repopulate the cache after `shutdown` cleared it.
+    if SHUTTING_DOWN.load(Ordering::SeqCst) {
+        return Err(anyhow!("Hush is quitting"));
+    }
     cache.insert(0, loaded.clone());
     cache.truncate(CACHE_SIZE);
     Ok(loaded)
@@ -67,11 +75,13 @@ pub fn evict(id: &str) {
 /// Release every loaded model. Must run before process exit: ggml's Metal
 /// backend asserts if buffers are still alive when its static teardown runs.
 pub fn shutdown() {
+    SHUTTING_DOWN.store(true, Ordering::SeqCst);
     for t in RUNNING.lock().values() {
         t.cancel();
     }
-    // Aborted runs return between decode steps; give them a moment to unwind.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    // Aborted runs return between decode steps and model loads can't be
+    // interrupted; give both a moment to finish.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while IN_FLIGHT.load(Ordering::SeqCst) > 0 && std::time::Instant::now() < deadline {
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
@@ -151,7 +161,9 @@ fn convert(t: transcribe_cpp::Transcript) -> Transcript {
 /// Cancel tokens of runs in flight, so `shutdown` can stop them.
 static RUNNING: LazyLock<Mutex<HashMap<u64, CancelToken>>> = LazyLock::new(Default::default);
 static NEXT_RUN: AtomicU64 = AtomicU64::new(0);
+/// Model loads and engine runs in progress; `shutdown` waits for them.
 static IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 
 /// Counts a blocking engine call as in flight for its whole lifetime.
 struct InFlight;

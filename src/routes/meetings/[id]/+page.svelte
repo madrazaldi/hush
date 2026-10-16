@@ -134,10 +134,12 @@
   }
 
   async function start() {
+    const forId = id;
     try {
       await saveNotesNow();
-      await api.meetingStart(id);
+      await api.meetingStart(forId);
       await app.refreshMeeting();
+      if (forId !== id) return;
       view = "notes";
       load();
     } catch (e) {
@@ -146,11 +148,13 @@
   }
 
   async function stop() {
+    const forId = id;
     stopping = true;
     await saveNotesNow();
     try {
       await api.meetingStop();
       app.meeting = null;
+      if (forId !== id) return;
       await load();
       if (hasAi && s.meetings.auto_enhance) view = "enhanced";
       else view = "transcript";
@@ -165,6 +169,7 @@
     if (!rec) return;
     const forId = id;
     await saveNotesNow();
+    if (forId !== id || !rec) return; // navigated away while saving
     enhancing = true;
     view = "enhanced";
     rec.enhanced = "";

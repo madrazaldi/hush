@@ -170,19 +170,36 @@ fn decode_ffmpeg(path: &Path, cancel: &AtomicBool) -> Result<Vec<f32>> {
         let _ = stderr.read_to_string(&mut s);
         s
     });
+    // Read on another thread so this loop can notice a cancel even while
+    // ffmpeg is stalled (say, on an unreachable network volume): dropping
+    // `child` then kills it, which ends the reader too.
     let mut stdout = child.0.stdout.take().expect("piped stdout");
+    let (tx, rx) = std::sync::mpsc::sync_channel::<std::io::Result<Vec<u8>>>(16);
+    std::thread::spawn(move || {
+        let mut buf = vec![0u8; 1 << 16];
+        loop {
+            let res = match stdout.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => Ok(buf[..n].to_vec()),
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => Err(e),
+            };
+            let failed = res.is_err();
+            if tx.send(res).is_err() || failed {
+                break;
+            }
+        }
+    });
     let mut out: Vec<f32> = Vec::new();
-    let mut buf = vec![0u8; 1 << 16];
     let mut carry: Vec<u8> = Vec::with_capacity(4);
     loop {
         check_cancel(cancel)?;
-        let n = match stdout.read(&mut buf) {
-            Ok(0) => break,
-            Ok(n) => n,
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e) => return Err(e).context("reading ffmpeg output"),
+        let bytes = match rx.recv_timeout(std::time::Duration::from_millis(100)) {
+            Ok(r) => r.context("reading ffmpeg output")?,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         };
-        carry.extend_from_slice(&buf[..n]);
+        carry.extend_from_slice(&bytes);
         let (whole, rest) = carry.as_chunks::<4>();
         out.extend(whole.iter().map(|b| f32::from_le_bytes(*b)));
         carry = rest.to_vec();
@@ -190,7 +207,13 @@ fn decode_ffmpeg(path: &Path, cancel: &AtomicBool) -> Result<Vec<f32>> {
             bail!(TooLong);
         }
     }
-    let status = child.0.wait().context("waiting for ffmpeg")?;
+    let status = loop {
+        check_cancel(cancel)?;
+        if let Some(status) = child.0.try_wait().context("waiting for ffmpeg")? {
+            break status;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
     if !status.success() {
         let err = stderr.join().unwrap_or_default();
         bail!("ffmpeg failed: {}", err.trim());
@@ -291,4 +314,30 @@ pub async fn download_url(url: &str, dest_dir: &Path) -> Result<Downloaded> {
     let title = if lines.len() >= 2 { lines[0].trim().to_string() } else { url.to_string() };
     partial.armed = false;
     Ok(Downloaded { path, title })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ffmpeg_decode_and_cancel() {
+        let Some(ffmpeg) = shell_env::which("ffmpeg") else { return };
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tone.opus");
+        let ok = std::process::Command::new(ffmpeg)
+            .args(["-nostdin", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=3"])
+            .arg(&path)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok);
+
+        let pcm = decode_file(&path, &AtomicBool::new(false)).unwrap();
+        let secs = pcm.len() as f64 / SAMPLE_RATE as f64;
+        assert!((secs - 3.0).abs() < 0.1, "decoded {secs} s");
+
+        let err = decode_file(&path, &AtomicBool::new(true)).unwrap_err();
+        assert_eq!(err.to_string(), "Cancelled");
+    }
 }

@@ -14,6 +14,7 @@ pub mod stt;
 pub mod tray;
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use parking_lot::{Mutex, RwLock};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, WindowEvent};
@@ -47,7 +48,9 @@ pub fn apply_dock_visibility(app: &AppHandle, show: bool) {
     let _ = (app, show);
 }
 
-static EXITING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Set once a quit has been held back to finish a meeting, and once that's done.
+static EXITING: AtomicBool = AtomicBool::new(false);
+static SHUTDOWN_DONE: AtomicBool = AtomicBool::new(false);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -184,17 +187,21 @@ pub fn run() {
             if let RunEvent::Reopen { .. } = event {
                 show_main(app, None);
             }
-            // Quitting mid-meeting: finish the recording properly first, then exit.
+            // Quitting mid-meeting (or while one is still being saved): finish the
+            // recording properly first, then exit. Repeated quits wait for the same shutdown.
             if let RunEvent::ExitRequested { api, code, .. } = &event
-                && state::get().meetings.active_id().is_some()
-                && !EXITING.swap(true, std::sync::atomic::Ordering::SeqCst)
+                && !SHUTDOWN_DONE.load(Ordering::SeqCst)
+                && (EXITING.load(Ordering::SeqCst) || state::get().meetings.needs_shutdown())
             {
                 api.prevent_exit();
-                let (app, code) = (app.clone(), code.unwrap_or(0));
-                tauri::async_runtime::spawn(async move {
-                    state::get().meetings.shutdown().await;
-                    app.exit(code);
-                });
+                if !EXITING.swap(true, Ordering::SeqCst) {
+                    let (app, code) = (app.clone(), code.unwrap_or(0));
+                    tauri::async_runtime::spawn(async move {
+                        state::get().meetings.shutdown().await;
+                        SHUTDOWN_DONE.store(true, Ordering::SeqCst);
+                        app.exit(code);
+                    });
+                }
             }
             if let RunEvent::Exit = event {
                 state::get().dictation.cancel();

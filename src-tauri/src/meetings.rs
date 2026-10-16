@@ -495,6 +495,16 @@ impl Meetings {
         {
             log::error!("finishing meeting on quit: {e:#}");
         }
+        // A meeting stopped just before quitting may still be saving its audio.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !self.finalizing.lock().is_empty() && Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    /// Whether quitting now would cut a meeting's recording or saving short.
+    pub fn needs_shutdown(&self) -> bool {
+        self.active.lock().is_some() || !self.finalizing.lock().is_empty()
     }
 
     async fn finish(&self, quitting: bool) -> Result<String> {

@@ -412,7 +412,10 @@ fn hide_later(ms: u64) {
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(ms));
         let st = state::get();
-        if !st.dictation.is_busy() {
+        // Checked and hidden under the lock: a session starting in between
+        // queues its `show` after this `hide` on the main thread.
+        let phase = st.dictation.phase.lock();
+        if matches!(*phase, Phase::Idle) {
             overlay::hide(&st.app);
         }
     });
