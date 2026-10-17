@@ -590,7 +590,7 @@ impl Meetings {
         let (dir, me_path, them_path) = (a.dir.clone(), a.me_wav.clone(), a.them_wav.clone());
         let shift_ms = them_offset - me_base;
         let mixed_path = tokio::task::spawn_blocking(move || {
-            mix_meeting_audio(&dir, me_path.as_deref(), them_path.as_deref(), shift_ms)
+            mix_meeting_audio(&dir, me_path.as_deref(), them_path.as_deref(), me_base, shift_ms)
         })
         .await
         .ok()
@@ -862,8 +862,15 @@ const AAC_BITRATE: u32 = 48_000;
 /// Combine this session's me/them WAVs into the meeting's audio file: stereo
 /// AAC with the mic on the left and system audio on the right, so a later
 /// re-transcription can still tell the user apart from the call. A resumed
-/// meeting is appended to the previous sessions' audio.
-fn mix_meeting_audio(dir: &Path, me: Option<&Path>, them: Option<&Path>, them_shift_ms: i64) -> Option<PathBuf> {
+/// meeting is appended to the previous sessions' audio, starting at the
+/// session's position on the meeting timeline (`base_ms`).
+fn mix_meeting_audio(
+    dir: &Path,
+    me: Option<&Path>,
+    them: Option<&Path>,
+    base_ms: i64,
+    them_shift_ms: i64,
+) -> Option<PathBuf> {
     let me = me.filter(|p| p.exists()).map(Path::to_path_buf);
     let them = them.filter(|p| p.exists()).map(Path::to_path_buf);
     let read = |p: &Option<PathBuf>| -> Vec<i16> {
@@ -899,7 +906,10 @@ fn mix_meeting_audio(dir: &Path, me: Option<&Path>, them: Option<&Path>, them_sh
         }
         None => (Vec::new(), Vec::new()),
     };
-    let len = left.len().max(right.len());
+    // Pad up to where this session's segments start, which is past the
+    // previous audio if an earlier session kept none.
+    let base = (base_ms.max(0) as usize) * SAMPLE_RATE as usize / 1000;
+    let len = left.len().max(right.len()).max(base);
     left.resize(len, 0);
     right.resize(len, 0);
     left.extend((0..n).map(|i| a.get(i).copied().unwrap_or(0)));
@@ -931,6 +941,8 @@ fn mix_meeting_audio(dir: &Path, me: Option<&Path>, them: Option<&Path>, them_sh
             }
             w.finalize().ok()?;
             std::fs::rename(&tmp, &legacy).ok()?;
+            // The WAV now holds everything; an older AAC would be read first on resume.
+            let _ = std::fs::remove_file(&aac);
             legacy
         }
     };

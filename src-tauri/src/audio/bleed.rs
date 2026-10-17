@@ -100,7 +100,8 @@ impl SysEnvelope {
     /// Offline version of [`suppress`](Self::suppress) for a whole recorded
     /// mic track, in blocks so the best lag can follow clock drift.
     pub fn suppress_all(&self, mic: &mut [f32]) -> usize {
-        const BLOCK: usize = FRAME * 20_000 / FRAME_MS as usize; // 20 s
+        // A whole number of frames, so every block stays on the system track's frame grid.
+        const BLOCK: usize = FRAME * (20_000 / FRAME_MS as usize); // ~20 s
         let mut silenced = 0;
         for (i, block) in mic.chunks_mut(BLOCK).enumerate() {
             let start = (i * BLOCK / FRAME) as i64;
@@ -237,6 +238,18 @@ mod tests {
         assert!(m > 150, "silenced {m}");
         assert!(first.iter().filter(|r| **r > 0.0).count() < first.len() / 5);
         assert!(second.iter().filter(|r| **r > 0.0).count() > second.len() * 9 / 10);
+    }
+
+    #[test]
+    fn suppresses_bleed_across_blocks() {
+        // Longer than two offline blocks, so later blocks must stay frame-aligned.
+        let sys = speechy(3, 50.0);
+        let mut mic = delayed(&sys, 2, 0.15);
+        let silenced = SysEnvelope::from_pcm(&sys).suppress_all(&mut mic);
+        let frames = mic.len().div_ceil(FRAME);
+        assert!(silenced * 10 > frames * 9, "silenced {silenced} of {frames}");
+        let tail = frame_rms(&mic[mic.len() - FRAME * 600..]);
+        assert!(tail.iter().filter(|r| **r > 0.0).count() < tail.len() / 10);
     }
 
     #[test]
