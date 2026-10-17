@@ -52,6 +52,21 @@
   const s = $derived(app.settings!);
   const hasAi = $derived(!!s.llm_profiles.length);
 
+  async function retranscribe() {
+    more = false;
+    const ok = await ask("This replaces the transcript with a fresh one from the saved recording. Edits to the transcript are lost.", {
+      title: "Re-transcribe meeting?",
+      kind: "warning",
+      okLabel: "Re-transcribe",
+    });
+    if (!ok) return;
+    try {
+      await api.retranscribe(id);
+    } catch (e) {
+      app.toast("error", errorText(e));
+    }
+  }
+
   async function load(initial = false) {
     const want = id;
     const r = await api.recording(want);
@@ -83,6 +98,7 @@
     const offs = [
       on<string>("meeting:transcript", (rid) => rid === id && load()),
       on<string>("recording:updated", (rid) => rid === id && !enhancing && load()),
+      on<{ id: string; status: string }>("recording:progress", (p) => p.id === id && rec && p.status !== rec.status && load()),
       on<{ me: number; them: number }>("meeting:levels", (l) => (levels = l)),
       on<{ id: string; reset?: boolean; delta?: string; done?: boolean }>("meeting:enhance", (e) => {
         if (e.id !== id || !rec) return;
@@ -230,6 +246,9 @@
               {/if}
               {#if rec.audio_path}
                 <button onclick={() => { more = false; api.reveal(rec!.audio_path!); }}><Mic size={14} /> Show recording</button>
+              {/if}
+              {#if rec.audio_path && !live}
+                <button disabled={rec.status === "processing"} onclick={retranscribe}><RefreshCw size={14} /> Re-transcribe</button>
               {/if}
               <button class="danger" disabled={live} onclick={remove}><Trash2 size={14} /> Delete</button>
             </div>

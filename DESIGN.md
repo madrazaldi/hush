@@ -12,7 +12,7 @@ speech and LLM providers as opt-in.
 | Long audio | Split at silences into ≤ model-max windows, offset timestamps | Parakeet has a per-call audio cap; cloud APIs have 25 MB / 10 min caps |
 | Mic | `cpal` → mono → `rubato` to 16 kHz | Universal; matches every engine's input |
 | System audio (macOS) | Core Audio process tap + private aggregate device via `cidre` (14.2+) | Same as Hyprnote/anarlog & Meetily; needs only "System Audio Recording" permission; no screen-recording indicator |
-| Me / Them | Separate mic + system streams, transcribed independently | Speaker separation for free (Granola "Me/Them"); VAD-gate mic to reduce bleed |
+| Me / Them | Separate mic + system streams, transcribed independently | Speaker separation for free (Granola "Me/Them"); mic frames whose loudness envelope tracks the system audio (speaker bleed) are silenced before transcription (`audio/bleed.rs`), with a text-similarity check as backstop. Saved as stereo AAC `meeting.m4a` (L = mic, R = system, 48 kbps via `afconvert`) so re-transcription keeps the separation |
 | Hotkeys | `handy-keys` (CGEventTap) | Modifier-only + Fn support, press/release edges for push-to-talk |
 | Activation | Push-to-talk, toggle, and hybrid (short tap latches) | Handy/Wispr behaviour; Esc cancels |
 | Insertion | Clipboard + synthesized ⌘V with clipboard restore; fallback typing; copy-only | Universal; restore only if clipboard unchanged |
@@ -41,7 +41,8 @@ src-tauri/src
 │   ├── models.rs     model catalog + downloads
 │   └── cloud.rs      OpenAI-compatible, xAI, Meta Muse, Deepgram, ElevenLabs, AssemblyAI
 ├── audio/
-│   ├── mod.rs        resampling, WAV IO, levels, silence split
+│   ├── mod.rs        resampling, WAV/AAC IO, levels, silence split
+│   ├── bleed.rs      mic-picks-up-speakers detection (envelope correlation)
 │   ├── mic.rs        cpal capture
 │   ├── system_macos.rs  Core Audio process tap
 │   └── decode.rs     symphonia / ffmpeg decode to 16 kHz mono

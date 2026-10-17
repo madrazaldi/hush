@@ -1,5 +1,6 @@
 //! Audio utilities shared across capture, decoding and transcription.
 
+pub mod bleed;
 pub mod decode;
 pub mod mic;
 #[cfg(target_os = "macos")]
@@ -200,6 +201,80 @@ impl WavSink {
         self.writer.finalize()?;
         Ok(())
     }
+}
+
+/// 16-bit samples of a mono or stereo recording: `(left, Some(right))` for
+/// stereo, `(mono, None)` for mono. WAV is read directly; anything else
+/// (the meetings' AAC) is decoded to a temporary WAV with `afconvert`.
+pub fn read_tracks(path: &Path) -> Result<(Vec<i16>, Option<Vec<i16>>)> {
+    let is_wav = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("wav"));
+    let tmp = (!is_wav).then(|| std::env::temp_dir().join(format!("hush-{}.wav", uuid::Uuid::new_v4().simple())));
+    if let Some(t) = &tmp {
+        afconvert(&[
+            path.as_os_str(),
+            "-o".as_ref(),
+            t.as_os_str(),
+            "-f".as_ref(),
+            "WAVE".as_ref(),
+            "-d".as_ref(),
+            "LEI16".as_ref(),
+        ])?;
+    }
+    let read = || -> Result<_> {
+        let r = hound::WavReader::open(tmp.as_deref().unwrap_or(path))?;
+        let channels = r.spec().channels as usize;
+        let samples: Vec<i16> = r.into_samples::<i16>().collect::<Result<_, _>>()?;
+        Ok(match channels {
+            1 => (samples, None),
+            c => {
+                let (l, r) = samples.chunks_exact(c).map(|f| (f[0], f[1])).unzip();
+                (l, Some(r))
+            }
+        })
+    };
+    let out = read();
+    if let Some(t) = tmp {
+        let _ = std::fs::remove_file(t);
+    }
+    out
+}
+
+/// Write stereo 16-bit tracks (padded to equal length) as AAC in an M4A
+/// container via `afconvert`, about a sixth the size of the 16-bit WAV.
+pub fn write_stereo_aac(path: &Path, left: &[i16], right: &[i16], rate: u32, bitrate: u32) -> Result<()> {
+    let wav = path.with_extension("tmp.wav");
+    let spec =
+        hound::WavSpec { channels: 2, sample_rate: rate, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
+    let res = (|| {
+        let mut w = hound::WavWriter::create(&wav, spec)?;
+        for i in 0..left.len().max(right.len()) {
+            w.write_sample(left.get(i).copied().unwrap_or(0))?;
+            w.write_sample(right.get(i).copied().unwrap_or(0))?;
+        }
+        w.finalize()?;
+        let b = bitrate.to_string();
+        afconvert(&[
+            wav.as_os_str(),
+            "-o".as_ref(),
+            path.as_os_str(),
+            "-f".as_ref(),
+            "m4af".as_ref(),
+            "-d".as_ref(),
+            "aac".as_ref(),
+            "-b".as_ref(),
+            b.as_ref(),
+        ])
+    })();
+    let _ = std::fs::remove_file(&wav);
+    res
+}
+
+fn afconvert(args: &[&std::ffi::OsStr]) -> Result<()> {
+    let out = std::process::Command::new("/usr/bin/afconvert").args(args).output()?;
+    if !out.status.success() {
+        anyhow::bail!("afconvert failed: {}", String::from_utf8_lossy(&out.stderr).trim());
+    }
+    Ok(())
 }
 
 /// Split audio into chunks no longer than `max_samples`, preferring to cut in

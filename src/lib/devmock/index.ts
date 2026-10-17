@@ -194,6 +194,17 @@ const handlers: Record<string, (a: any) => unknown> = {
     if (segment_speaker) r.segments[segment_speaker[0]].speaker = segment_speaker[1];
     return structuredClone(r);
   },
+  retranscribe: (a) => {
+    const r = recordings.find((r) => r.id === a.id);
+    if (!r) return;
+    r.status = "processing";
+    emit("recording:progress", { id: r.id, status: "processing", stage: "transcribing", progress: 0, error: null });
+    setTimeout(() => {
+      r.status = "ready";
+      emit("recording:progress", { id: r.id, status: "ready", stage: "", progress: 1, error: null });
+      emit("recording:updated", r.id);
+    }, 1500);
+  },
   // `?live` previews m1 as an in-progress recording.
   meeting_status: () =>
     new URLSearchParams(location.search).has("live")

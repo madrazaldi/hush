@@ -183,20 +183,6 @@ async fn run_job(id: &str) -> Result<()> {
         st.emit("recording:updated", id);
     }
 
-    // 2. Decode.
-    st.db.set_status(id, "processing", 0.0, None)?;
-    emit(id, "processing", "decoding", 0.0, None);
-    let media = PathBuf::from(rec.media_path.clone().unwrap_or_default());
-    // Dropping this future (job cancelled) sets the flag, which stops the decoder.
-    let cancel = Arc::new(AtomicBool::new(false));
-    let _stop_decode = SetOnDrop(cancel.clone());
-    let pcm = tokio::task::spawn_blocking(move || audio::decode::decode_file(&media, &cancel)).await??;
-    if pcm.is_empty() {
-        return Err(anyhow!("No audio found in this file"));
-    }
-    let duration_ms = pcm.len() as i64 * 1000 / SAMPLE_RATE as i64;
-
-    // 3. Transcribe.
     let profile_id = rec.stt.clone().unwrap_or_else(|| s.files.stt_profile.clone());
     let profile = s.stt(&profile_id);
     let opts = SttOptions {
@@ -205,18 +191,40 @@ async fn run_job(id: &str) -> Result<()> {
         diarize: s.files.diarize,
         ..Default::default()
     };
-    emit(id, "processing", "transcribing", 0.0, None);
     let id_owned = id.to_string();
     let last = Mutex::new(0.0f32);
-    let transcript = stt::transcribe(&profile, &pcm, &opts, &|p| {
+    let progress = |p: f32| {
         let mut l = last.lock();
         if p - *l >= 0.01 || p >= 1.0 {
             *l = p;
             let _ = state::get().db.set_status(&id_owned, "processing", p as f64, None);
             emit(&id_owned, "processing", "transcribing", p as f64, None);
         }
-    })
-    .await?;
+    };
+    let media = PathBuf::from(rec.media_path.clone().unwrap_or_default());
+
+    let (transcript, duration_ms) = if rec.kind == "meeting" {
+        // Meeting audio keeps mic and system audio on separate channels.
+        st.db.set_status(id, "processing", 0.0, None)?;
+        emit(id, "processing", "transcribing", 0.0, None);
+        (crate::meetings::transcribe_audio(&media, &profile, &opts, &progress).await?, rec.duration_ms)
+    } else {
+        // 2. Decode.
+        st.db.set_status(id, "processing", 0.0, None)?;
+        emit(id, "processing", "decoding", 0.0, None);
+        // Dropping this future (job cancelled) sets the flag, which stops the decoder.
+        let cancel = Arc::new(AtomicBool::new(false));
+        let _stop_decode = SetOnDrop(cancel.clone());
+        let pcm = tokio::task::spawn_blocking(move || audio::decode::decode_file(&media, &cancel)).await??;
+        if pcm.is_empty() {
+            return Err(anyhow!("No audio found in this file"));
+        }
+        let duration_ms = pcm.len() as i64 * 1000 / SAMPLE_RATE as i64;
+
+        // 3. Transcribe.
+        emit(id, "processing", "transcribing", 0.0, None);
+        (stt::transcribe(&profile, &pcm, &opts, &progress).await?, duration_ms)
+    };
 
     let mut segments = transcript.segments;
     if segments.is_empty() && !transcript.text.is_empty() {
