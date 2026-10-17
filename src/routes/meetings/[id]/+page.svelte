@@ -52,6 +52,36 @@
   const s = $derived(app.settings!);
   const hasAi = $derived(!!s.llm_profiles.length);
 
+  // Meeting whose notes to regenerate once its re-transcription finishes.
+  let regenerateFor: string | null = null;
+
+  async function retranscribe() {
+    more = false;
+    const ok = await ask("This replaces the transcript with a fresh one from the saved recording. Edits to the transcript are lost.", {
+      title: "Re-transcribe meeting?",
+      kind: "warning",
+      okLabel: "Re-transcribe",
+    });
+    if (!ok) return;
+    // Notes generated from the old transcript would go stale; replacing them
+    // (and any edits to them) is the user's call.
+    const regen =
+      !!rec?.enhanced &&
+      hasAi &&
+      (await ask("Regenerate the notes from the new transcript when it's ready? This replaces the current notes, including any edits.", {
+        title: "Update notes?",
+        kind: "info",
+        okLabel: "Regenerate",
+        cancelLabel: "Keep notes",
+      }));
+    try {
+      await api.retranscribe(id);
+      regenerateFor = regen ? id : null;
+    } catch (e) {
+      app.toast("error", errorText(e));
+    }
+  }
+
   async function load(initial = false) {
     const want = id;
     const r = await api.recording(want);
@@ -83,6 +113,17 @@
     const offs = [
       on<string>("meeting:transcript", (rid) => rid === id && load()),
       on<string>("recording:updated", (rid) => rid === id && !enhancing && load()),
+      on<{ id: string; status: string; error: string | null }>("recording:progress", (p) => {
+        if (p.id !== id || !rec || p.status === rec.status) return;
+        if (p.status === "error") {
+          regenerateFor = null;
+          app.toast("error", `Re-transcription failed: ${p.error ?? "unknown error"}`);
+        } else if (p.status === "ready" && regenerateFor === id) {
+          regenerateFor = null;
+          enhance();
+        }
+        load();
+      }),
       on<{ me: number; them: number }>("meeting:levels", (l) => (levels = l)),
       on<{ id: string; reset?: boolean; delta?: string; done?: boolean }>("meeting:enhance", (e) => {
         if (e.id !== id || !rec) return;
@@ -230,6 +271,9 @@
               {/if}
               {#if rec.audio_path}
                 <button onclick={() => { more = false; api.reveal(rec!.audio_path!); }}><Mic size={14} /> Show recording</button>
+              {/if}
+              {#if rec.audio_path && !live}
+                <button disabled={rec.status === "processing"} onclick={retranscribe}><RefreshCw size={14} /> Re-transcribe</button>
               {/if}
               <button class="danger" disabled={live} onclick={remove}><Trash2 size={14} /> Delete</button>
             </div>

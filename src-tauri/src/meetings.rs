@@ -14,6 +14,7 @@ use serde::Serialize;
 use tokio::sync::mpsc;
 
 use crate::ai;
+use crate::audio::bleed::{FRAME, FRAME_MS, SysEnvelope};
 use crate::audio::{WavSink, mic::MicCapture};
 use crate::db::{self, Recording};
 use crate::llm;
@@ -22,7 +23,6 @@ use crate::stt::{self, SAMPLE_RATE, Segment, SttOptions};
 
 pub const ME: &str = "Me";
 pub const THEM: &str = "Them";
-const FRAME: usize = (SAMPLE_RATE as usize) * 30 / 1000; // 30 ms
 const PREROLL_FRAMES: usize = 10; // 300 ms
 const END_SILENCE_FRAMES: usize = 24; // 720 ms
 const MIN_UTTERANCE: usize = SAMPLE_RATE as usize; // 1 s
@@ -132,10 +132,18 @@ struct Segmenter {
     queue: Option<ChunkQueue>,
     wav: Option<WavSink>,
     level: f32,
+    /// System-audio levels: "Them" records them, "Me" uses them to silence bleed.
+    env: Arc<Mutex<SysEnvelope>>,
 }
 
 impl Segmenter {
-    fn new(speaker: &'static str, offset_ms: i64, queue: ChunkQueue, wav: Option<WavSink>) -> Self {
+    fn new(
+        speaker: &'static str,
+        offset_ms: i64,
+        queue: ChunkQueue,
+        wav: Option<WavSink>,
+        env: Arc<Mutex<SysEnvelope>>,
+    ) -> Self {
         Self {
             speaker,
             offset_ms,
@@ -150,7 +158,13 @@ impl Segmenter {
             queue: Some(queue),
             wav,
             level: 0.0,
+            env,
         }
+    }
+
+    /// Frame index on the meeting timeline of sample `pos` of this stream.
+    fn timeline_frame(&self, pos: usize) -> i64 {
+        self.offset_ms / FRAME_MS + (pos / FRAME) as i64
     }
 
     fn push(&mut self, pcm: &[f32]) {
@@ -169,6 +183,9 @@ impl Segmenter {
     fn on_frame(&mut self, f: Vec<f32>) {
         let rms = (f.iter().map(|s| s * s).sum::<f32>() / f.len() as f32).sqrt();
         self.level = crate::audio::level(&f);
+        if self.speaker == THEM {
+            self.env.lock().push(self.timeline_frame(self.pos), rms);
+        }
         // Noise floor: fast down, slow up.
         self.noise = if rms < self.noise { rms.max(1e-5) } else { self.noise * 0.998 + rms * 0.002 };
         let speech = rms > (self.noise * 3.0).max(0.006);
@@ -210,8 +227,19 @@ impl Segmenter {
     }
 
     fn emit(&mut self) {
-        let pcm = std::mem::take(&mut self.buf);
+        let mut pcm = std::mem::take(&mut self.buf);
         let start_ms = self.offset_ms + (self.buf_start as i64) * 1000 / SAMPLE_RATE as i64;
+        if self.speaker == ME {
+            // Silence what the mic picked up from the speakers; skip the chunk
+            // if hardly any of the user's own speech is left.
+            let bleed = self.env.lock().suppress(&mut pcm, self.timeline_frame(self.buf_start));
+            let thresh = (self.noise * 3.0).max(0.006);
+            let own =
+                crate::audio::bleed::frame_rms(&pcm).iter().zip(&bleed).filter(|(r, b)| !**b && **r > thresh).count();
+            if own < 10 {
+                return;
+            }
+        }
         if let Some(q) = &self.queue {
             q.send(self.speaker, start_ms, pcm);
         }
@@ -408,7 +436,8 @@ impl Meetings {
         let queued = queue.queued.clone();
         let paused = Arc::new(AtomicBool::new(false));
         let me_sink = me_wav.as_ref().and_then(|p| WavSink::create(p, SAMPLE_RATE, 1).ok());
-        let me = Arc::new(Mutex::new(Segmenter::new(ME, base_ms, queue.clone(), me_sink)));
+        let env = Arc::new(Mutex::new(SysEnvelope::live()));
+        let me = Arc::new(Mutex::new(Segmenter::new(ME, base_ms, queue.clone(), me_sink, env.clone())));
         let them: Arc<Mutex<Option<Segmenter>>> = Arc::new(Mutex::new(None));
         let them_init: ThemInit = Arc::new(Mutex::new(None));
 
@@ -435,6 +464,7 @@ impl Meetings {
                 *them_init.lock() = Some((queue.clone(), them_wav.clone()));
                 start_system_capture(SystemStart {
                     me: me.clone(),
+                    env: env.clone(),
                     them: them.clone(),
                     them_init: them_init.clone(),
                     paused: paused.clone(),
@@ -560,7 +590,7 @@ impl Meetings {
         let (dir, me_path, them_path) = (a.dir.clone(), a.me_wav.clone(), a.them_wav.clone());
         let shift_ms = them_offset - me_base;
         let mixed_path = tokio::task::spawn_blocking(move || {
-            mix_meeting_audio(&dir, me_path.as_deref(), them_path.as_deref(), shift_ms)
+            mix_meeting_audio(&dir, me_path.as_deref(), them_path.as_deref(), me_base, shift_ms)
         })
         .await
         .ok()
@@ -637,6 +667,7 @@ impl Meetings {
 #[cfg(target_os = "macos")]
 struct SystemStart {
     me: Arc<Mutex<Segmenter>>,
+    env: Arc<Mutex<SysEnvelope>>,
     them: Arc<Mutex<Option<Segmenter>>>,
     them_init: ThemInit,
     paused: Arc<AtomicBool>,
@@ -650,7 +681,7 @@ struct SystemStart {
 /// the mic's current position, so a slow prompt doesn't shift the timeline.
 #[cfg(target_os = "macos")]
 fn start_system_capture(c: SystemStart) {
-    let SystemStart { me, them, them_init, paused, system, error, stopping } = c;
+    let SystemStart { me, env, them, them_init, paused, system, error, stopping } = c;
     std::thread::spawn(move || {
         let them2 = them.clone();
         let res = crate::audio::system_macos::SystemAudioCapture::start(Box::new(move |pcm| {
@@ -663,7 +694,7 @@ fn start_system_capture(c: SystemStart) {
                 let Some((queue, wav)) = them_init.lock().take() else { return };
                 let offset = me.lock().duration_ms();
                 let sink = wav.and_then(|p| WavSink::create(&p, SAMPLE_RATE, 1).ok());
-                *slot = Some(Segmenter::new(THEM, offset, queue, sink));
+                *slot = Some(Segmenter::new(THEM, offset, queue, sink, env.clone()));
             }
             if let Some(seg) = slot.as_mut() {
                 seg.push(pcm);
@@ -825,9 +856,21 @@ async fn transcribe_worker(id: String, mut rx: mpsc::UnboundedReceiver<Chunk>, q
     }
 }
 
-/// Mix this session's me/them WAVs into one mono file (appending to an
-/// existing mix when a meeting was resumed).
-fn mix_meeting_audio(dir: &Path, me: Option<&Path>, them: Option<&Path>, them_shift_ms: i64) -> Option<PathBuf> {
+/// Bitrate of the stored meeting audio (stereo AAC, ~0.35 MB per minute).
+const AAC_BITRATE: u32 = 48_000;
+
+/// Combine this session's me/them WAVs into the meeting's audio file: stereo
+/// AAC with the mic on the left and system audio on the right, so a later
+/// re-transcription can still tell the user apart from the call. A resumed
+/// meeting is appended to the previous sessions' audio, starting at the
+/// session's position on the meeting timeline (`base_ms`).
+fn mix_meeting_audio(
+    dir: &Path,
+    me: Option<&Path>,
+    them: Option<&Path>,
+    base_ms: i64,
+    them_shift_ms: i64,
+) -> Option<PathBuf> {
     let me = me.filter(|p| p.exists()).map(Path::to_path_buf);
     let them = them.filter(|p| p.exists()).map(Path::to_path_buf);
     let read = |p: &Option<PathBuf>| -> Vec<i16> {
@@ -849,34 +892,117 @@ fn mix_meeting_audio(dir: &Path, me: Option<&Path>, them: Option<&Path>, them_sh
     if n == 0 {
         return None;
     }
-    let out_path = dir.join("meeting.wav");
-    let mut existing: Vec<i16> = if out_path.exists() {
-        hound::WavReader::open(&out_path).ok().map(|r| r.into_samples::<i16>().flatten().collect()).unwrap_or_default()
-    } else {
-        Vec::new()
+    let (aac, legacy) = (dir.join("meeting.m4a"), dir.join("meeting.wav"));
+    let previous = [&aac, &legacy].into_iter().find(|p| p.exists());
+    let (mut left, mut right) = match previous.map(|p| crate::audio::read_tracks(p)) {
+        Some(Ok((l, r))) => {
+            // Older meetings were saved as a mono mix.
+            let r = r.unwrap_or_else(|| l.clone());
+            (l, r)
+        }
+        Some(Err(e)) => {
+            log::error!("reading previous meeting audio failed, not appending to it: {e:#}");
+            return None;
+        }
+        None => (Vec::new(), Vec::new()),
     };
-    let spec = hound::WavSpec {
-        channels: 1,
-        sample_rate: SAMPLE_RATE,
-        bits_per_sample: 16,
-        sample_format: hound::SampleFormat::Int,
+    // Pad up to where this session's segments start, which is past the
+    // previous audio if an earlier session kept none.
+    let base = (base_ms.max(0) as usize) * SAMPLE_RATE as usize / 1000;
+    let len = left.len().max(right.len()).max(base);
+    left.resize(len, 0);
+    right.resize(len, 0);
+    left.extend((0..n).map(|i| a.get(i).copied().unwrap_or(0)));
+    right.extend((0..n).map(|i| b.get(i).copied().unwrap_or(0)));
+
+    let tmp = dir.join("meeting.tmp.m4a");
+    let out = match crate::audio::write_stereo_aac(&tmp, &left, &right, SAMPLE_RATE, AAC_BITRATE)
+        .and_then(|_| Ok(std::fs::rename(&tmp, &aac)?))
+    {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&legacy);
+            aac
+        }
+        Err(e) => {
+            // Keep the audio uncompressed rather than lose it.
+            log::error!("encoding meeting audio failed, keeping WAV: {e:#}");
+            let _ = std::fs::remove_file(&tmp);
+            let spec = hound::WavSpec {
+                channels: 2,
+                sample_rate: SAMPLE_RATE,
+                bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+            };
+            let tmp = dir.join("meeting.wav.tmp");
+            let mut w = hound::WavWriter::create(&tmp, spec).ok()?;
+            for (l, r) in left.iter().zip(&right) {
+                let _ = w.write_sample(*l);
+                let _ = w.write_sample(*r);
+            }
+            w.finalize().ok()?;
+            std::fs::rename(&tmp, &legacy).ok()?;
+            // The WAV now holds everything; an older AAC would be read first on resume.
+            let _ = std::fs::remove_file(&aac);
+            legacy
+        }
     };
-    let tmp = dir.join("meeting.wav.tmp");
-    let mut w = hound::WavWriter::create(&tmp, spec).ok()?;
-    for s in existing.drain(..) {
-        let _ = w.write_sample(s);
-    }
-    for i in 0..n {
-        let x = *a.get(i).unwrap_or(&0) as i32 + *b.get(i).unwrap_or(&0) as i32;
-        let _ = w.write_sample(x.clamp(i16::MIN as i32, i16::MAX as i32) as i16);
-    }
-    w.finalize().ok()?;
-    std::fs::rename(&tmp, &out_path).ok()?;
     // The per-stream files are no longer needed once mixed.
     for p in [me, them].into_iter().flatten() {
         let _ = std::fs::remove_file(p);
     }
-    Some(out_path)
+    Some(out)
+}
+
+/// Re-transcribe a meeting's saved audio. Stereo recordings are transcribed
+/// per channel (left = "Me" with speaker bleed removed, right = "Them");
+/// older mono mixes fall back to the provider's diarization.
+pub async fn transcribe_audio(
+    path: &Path,
+    profile: &stt::SttProfile,
+    opts: &SttOptions,
+    progress: &(dyn Fn(f32) + Send + Sync),
+) -> Result<stt::Transcript> {
+    let p = path.to_path_buf();
+    let (left, right) = tokio::task::spawn_blocking(move || crate::audio::read_tracks(&p)).await??;
+    let f32s = |v: Vec<i16>| v.into_iter().map(|s| s as f32 / i16::MAX as f32).collect::<Vec<f32>>();
+    let Some(right) = right else {
+        let opts = SttOptions { diarize: true, ..opts.clone() };
+        let mono = f32s(left);
+        let mut t = stt::transcribe(profile, &mono, &opts, progress).await?;
+        t.segments = with_fallback_segment(t.segments, &t.text, mono.len());
+        return Ok(t);
+    };
+    let them = f32s(right);
+    let mut me = f32s(left);
+    let silenced = SysEnvelope::from_pcm(&them).suppress_all(&mut me);
+    log::info!("meeting re-transcribe: silenced {:.0}s of mic bleed", silenced as i64 * FRAME_MS / 1000);
+
+    let t_them = stt::transcribe(profile, &them, opts, &|p| progress(p * 0.5)).await?;
+    let t_me = stt::transcribe(profile, &me, opts, &|p| progress(0.5 + p * 0.5)).await?;
+    let label = |segs: Vec<Segment>, speaker: &str| {
+        segs.into_iter().map(|s| Segment { speaker: Some(speaker.to_string()), ..s }).collect::<Vec<_>>()
+    };
+    let mut segments = label(with_fallback_segment(t_them.segments, &t_them.text, them.len()), THEM);
+    let mine = label(with_fallback_segment(t_me.segments, &t_me.text, me.len()), ME);
+    let theirs = segments.clone();
+    segments.extend(mine.into_iter().filter(|s| !s.text.trim().is_empty() && !is_bleed(s, &theirs)));
+    segments.sort_by_key(|s| s.start_ms);
+    let text = segments.iter().map(|s| s.text.trim()).collect::<Vec<_>>().join(" ");
+    Ok(stt::Transcript { text, language: t_them.language.or(t_me.language), segments })
+}
+
+/// Providers that return only text get one segment spanning the audio.
+fn with_fallback_segment(segments: Vec<Segment>, text: &str, samples: usize) -> Vec<Segment> {
+    if segments.is_empty() && !text.trim().is_empty() {
+        vec![Segment {
+            start_ms: 0,
+            end_ms: samples as i64 * 1000 / SAMPLE_RATE as i64,
+            text: text.trim().to_string(),
+            ..Default::default()
+        }]
+    } else {
+        segments
+    }
 }
 
 /// Generate enhanced notes with the given (or saved) template, streaming deltas
