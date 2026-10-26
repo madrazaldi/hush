@@ -13,5 +13,7 @@ node_modules
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 # Native helper build output.
-/native/hush-native/target/
+/native/hush-native/.build/
+# transcribe.cpp sources and install prefix (`bun run build:native` fetches and builds them).
+/native/hush-native/vendor/
 /native/bin/

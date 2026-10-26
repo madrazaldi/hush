@@ -3,7 +3,7 @@
 Hush is a macOS (Apple Silicon, 14.2+) desktop app: dictation, file transcription and
 meeting notes. [Electrobun](https://electrobun.dev) shell rendering with bundled Chromium (CEF),
 backend in TypeScript on Bun (`src/bun/`), SvelteKit SPA frontend (Svelte 5 runes, TypeScript),
-and a small Rust helper (`native/hush-native`) for the parts that need native code.
+and a small Swift helper (`native/hush-native`) for the parts that need native code.
 Use bun for everything JS (not npm/pnpm/yarn). Read `DESIGN.md` for the research and architecture.
 
 ## Commands
@@ -15,15 +15,18 @@ bun run app:dev                    # full app: builds the helper + UI, then `ele
 bun run app:build                  # release build: artifacts/ gets the .dmg and update files
 bun run check                      # svelte-check + tsc for src/bun (must be 0 errors, 0 warnings)
 bun run test                       # bun test src/bun (the TypeScript backend)
-bun run test:native                # cargo test in native/hush-native
-cd native/hush-native && cargo fmt && cargo clippy --all-targets -- -D warnings   # CI enforces both
+bun run build:native               # transcribe.cpp (first time) + swift build, staged at native/bin/hush-native
+bun run test:native                # swift test in native/hush-native
+cd native/hush-native && swift format --in-place --recursive Sources Tests Package.swift
+bun run lint:native                # swift format lint --strict; CI also builds with -warnings-as-errors
 bun run transcribe -- <file> [model-id]   # local STT on a file through the helper
 bun run llm                        # dictation cleanup via each installed agent CLI
 bun run systap                     # system-audio tap smoke test (needs the permission, prints levels)
 ```
 
-Building the helper needs a Rust toolchain and CMake (transcribe-cpp compiles ggml with Metal). The
-first build is slow. `electrobun prepare` (run by `bun install`, `dev`, `check`, `app:*`) projects the Electrobun SDK into
+Building the helper needs Xcode (Swift 6) and CMake. `scripts/build-native.ts` clones transcribe.cpp at a
+pinned tag into `native/hush-native/vendor/` and builds ggml with Metal there (gitignored); the first build is
+slow, later ones reuse it. `electrobun prepare` (run by `bun install`, `dev`, `check`, `app:*`) projects the Electrobun SDK into
 `.hutch/devkit`, which `tsconfig.bun.json` and the `#electrobun/view` import use.
 
 ## Layout
@@ -42,7 +45,7 @@ first build is slow. `electrobun prepare` (run by `bun install`, `dev`, `check`,
   pipeline), `files.ts`, `meetings/`, `ai.ts`/`ai-data.ts` (all prompts), `db.ts` (SQLite via `bun:sqlite`),
   `media-server.ts` (loopback server for playback and dropped files), `native.ts` (helper client),
   `autostart.ts`, `app.ts` (startup/shutdown).
-- `native/hush-native/` is the Rust helper, see below. `scripts/` are build and tooling scripts (Bun).
+- `native/hush-native/` is the Swift helper, see below. `scripts/` are build and tooling scripts (Bun).
 - Frontend: `src/routes/*` pages, `src/lib/components`, `src/lib/settings` (settings tabs),
   `src/lib/state.svelte.ts` (global `app` store, event subscriptions, debounced save),
   `src/app.css` (design tokens + shared classes: `.btn`, `.input`, `.card`, `.chip`, ...).
@@ -51,12 +54,15 @@ first build is slow. `electrobun prepare` (run by `bun install`, `dev`, `check`,
 
 ## The native helper
 
-`native/hush-native` is the only Rust left: audio capture (mic via cpal, system audio via a Core Audio
-process tap), ggml/Metal speech-to-text, global hotkeys (CGEventTap) and paste/keystroke synthesis.
-Bun talks to it with newline-delimited JSON-RPC 2.0 over stdio (`src/bun/backend/native.ts`; protocol
-documented in `native/hush-native/src/rpc.rs`). Logs go to stderr; stdout carries only protocol lines.
+`native/hush-native` is a SwiftPM package: audio capture (mic via an AUHAL unit, system audio via a Core
+Audio process tap), ggml/Metal speech-to-text (transcribe.cpp through its C API), global hotkeys
+(CGEventTap) and paste/keystroke synthesis. The realtime audio callbacks and their lock-free ring are C
+(`Sources/CHushAudio`) so they never allocate; keep it that way. Bun talks to it with newline-delimited
+JSON-RPC 2.0 over stdio (`src/bun/backend/native.ts`; protocol documented in
+`native/hush-native/Sources/HushNative/RPC.swift`). Wire names are snake_case, mapped from camelCase
+Swift by the coders in `JSON.swift`. Logs go to stderr; stdout carries only protocol lines.
 Audio never goes through the JSON channel: captures write f32 files (rotated into `<path>.<seq>` chunks
-for meetings) and STT reads them by path. The helper is not a Tauri or Electrobun app and has no UI. Add
+for meetings) and STT reads them by path. The helper is not an app bundle and has no UI. Add
 to it only what cannot be done from Bun.
 
 ## Conventions and gotchas
@@ -82,8 +88,8 @@ to it only what cannot be done from Bun.
 ## Environment variables
 
 - `HUSH_DATA_DIR`: use this instead of `~/Library/Application Support/com.hush.app` (tests, throwaway runs).
-- `HUSH_DEBUG=1`: debug logging. `HUSH_NATIVE_BIN`: helper binary to use. `HUSH_NATIVE_PROFILE=debug`:
-  build the helper in debug.
+- `HUSH_DEBUG=1`: debug logging (the helper too). `HUSH_NATIVE_LOG`: helper log level (error, warn, info,
+  debug). `HUSH_NATIVE_BIN`: helper binary to use. `HUSH_NATIVE_PROFILE=debug`: build the helper in debug.
 - `HUSH_NO_DEV_SERVER=1`: with `electrobun dev`, load the built `dist/` instead of Vite.
 - Build time: `HUSH_APP_ID` (bundle identifier; set it for smoke-test builds, because Electrobun keeps the
   CEF profile and caches under `~/Library/{Application Support,Caches}/<identifier>/stable/`),
@@ -97,6 +103,6 @@ to it only what cannot be done from Bun.
 
 Verify UI changes in the browser preview (`bun run dev`, `?onboarding`, `?live`,
 `window.__hushEmit(event, payload)`), then run `bun run check`, `bun run test` and, for helper
-changes, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` in
-`native/hush-native`. For shell changes, build with `HUSH_APP_ID=com.hush.smoke HUSH_CDP_PORT=9222`
+changes, `bun run lint:native`, `swift build -Xswiftc -warnings-as-errors` and `swift test` in
+`native/hush-native` (plus `bun run systap` and `bun run transcribe` for capture and STT). For shell changes, build with `HUSH_APP_ID=com.hush.smoke HUSH_CDP_PORT=9222`
 and launch with `HUSH_DATA_DIR` pointed at a temp folder; do not touch the installed app's data.
