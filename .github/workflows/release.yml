@@ -1,7 +1,12 @@
 name: Release
 
-# Push a tag like v0.2.0 (matching "version" in src-tauri/tauri.conf.json)
-# to build the macOS app and publish a GitHub release with the .dmg.
+# Push a tag like v0.2.0 (matching "version" in electrobun.config.ts and package.json) to run CI, build the
+# macOS app (Apple Silicon, bundled Chromium) and publish a GitHub release with the .dmg.
+#
+# macOS signing is opt-in per secret group, so forks and fresh clones still get an (unsigned) build:
+#   sign:      ELECTROBUN_CERTIFICATE (base64 .p12), ELECTROBUN_CERTIFICATE_PASSWORD,
+#              ELECTROBUN_DEVELOPER_ID (the identity name)
+#   notarize:  ELECTROBUN_APPLEID, ELECTROBUN_APPLEIDPASS, ELECTROBUN_TEAMID
 on:
   push:
     tags: ["v*"]
@@ -11,12 +16,20 @@ on:
         description: Existing tag to (re)build, e.g. v0.1.0
         required: true
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   release:
     name: Build macOS (Apple Silicon)
+    needs: ci
     runs-on: macos-latest
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
@@ -24,55 +37,74 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
-      - name: Check tag matches app version
-        run: |
-          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          if [ "v$version" != "$TAG" ]; then
-            echo "::error::Tag $TAG does not match tauri.conf.json version $version"
-            exit 1
-          fi
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
-      # Vite and svelte-check run on Node.
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: native/hush-native
           key: release
       - run: bun install --frozen-lockfile
-
-      # Code signing and notarization are optional. Add these repository secrets
-      # to ship a signed, notarized build; without them the app is ad-hoc signed.
-      - name: Configure signing
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - name: Check tag matches app version
         run: |
-          for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
-            if [ -n "${!v}" ]; then echo "$v=${!v}" >> "$GITHUB_ENV"; fi
-          done
-          if [ -z "$APPLE_SIGNING_IDENTITY" ]; then echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"; fi
+          version=$(bun scripts/version.ts)
+          if [ "v$version" != "$TAG" ]; then
+            echo "::error::Tag $TAG does not match app version $version"
+            exit 1
+          fi
 
-      - uses: tauri-apps/tauri-action@v1
+      # Secrets that are unset expand to empty strings, and a present-but-empty variable would turn
+      # signing on, so export only the groups that are complete.
+      - name: Configure macOS signing
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CERTIFICATE: ${{ secrets.ELECTROBUN_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.ELECTROBUN_CERTIFICATE_PASSWORD }}
+          DEVELOPER_ID: ${{ secrets.ELECTROBUN_DEVELOPER_ID }}
+          APPLEID: ${{ secrets.ELECTROBUN_APPLEID }}
+          APPLEIDPASS: ${{ secrets.ELECTROBUN_APPLEIDPASS }}
+          TEAMID: ${{ secrets.ELECTROBUN_TEAMID }}
+        run: |
+          if [ -n "$CERTIFICATE" ] && [ -n "$DEVELOPER_ID" ]; then
+            keychain="$RUNNER_TEMP/build.keychain-db"
+            pass=$(uuidgen)
+            security create-keychain -p "$pass" "$keychain"
+            security set-keychain-settings -lut 21600 "$keychain"
+            security unlock-keychain -p "$pass" "$keychain"
+            echo "$CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+            security import "$RUNNER_TEMP/cert.p12" -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+            security set-key-partition-list -S apple-tool:,apple: -k "$pass" "$keychain" >/dev/null
+            security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+            rm "$RUNNER_TEMP/cert.p12"
+            echo "ELECTROBUN_DEVELOPER_ID=$DEVELOPER_ID" >> "$GITHUB_ENV"
+            if [ -n "$APPLEID" ] && [ -n "$APPLEIDPASS" ] && [ -n "$TEAMID" ]; then
+              echo "ELECTROBUN_APPLEID=$APPLEID" >> "$GITHUB_ENV"
+              echo "ELECTROBUN_APPLEIDPASS=$APPLEIDPASS" >> "$GITHUB_ENV"
+              echo "ELECTROBUN_TEAMID=$TEAMID" >> "$GITHUB_ENV"
+            else
+              echo "::warning::Apple notarization secrets not set: signing without notarizing"
+            fi
+          else
+            echo "::warning::Apple signing secrets not set: building an unsigned app"
+          fi
+
+      # Builds the native helper, the UI and the app (artifacts/ gets the .dmg and the update files).
+      - name: Build
+        run: bun run app:build
+
+      - uses: softprops/action-gh-release@v2
         with:
-          tagName: ${{ env.TAG }}
-          releaseName: Hush ${{ env.TAG }}
-          releaseBody: |
+          tag_name: ${{ env.TAG }}
+          name: Hush ${{ env.TAG }}
+          prerelease: ${{ contains(env.TAG, '-') }}
+          files: artifacts/*
+          body: |
             **Hush** for macOS 14.2+ on Apple Silicon.
 
-            Download `Hush_*_aarch64.dmg`, open it and drag Hush to Applications.
+            Download `macos-arm64-Hush.dmg`, open it and drag Hush to Applications.
 
             If this build isn't notarized, macOS will say the app "is damaged" or "can't be opened". Clear the download quarantine once:
 
@@ -81,7 +113,3 @@ jobs:
             ```
 
             See the [README](https://github.com/${{ github.repository }}#readme) for setup and permissions.
-          releaseDraft: false
-          prerelease: ${{ contains(env.TAG, '-') }}
-          tauriScript: bun tauri
-          args: --target aarch64-apple-darwin

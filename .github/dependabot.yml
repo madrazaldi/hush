@@ -16,7 +16,7 @@ updates:
       - dependency-name: typescript
         update-types: ["version-update:semver-major"]
   - package-ecosystem: cargo
-    directory: /src-tauri
+    directory: /native/hush-native
     schedule:
       interval: monthly
     groups:
