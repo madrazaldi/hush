@@ -30,9 +30,9 @@
 </script>
 
 <aside>
-  <div class="top" data-tauri-drag-region></div>
+  <div class="top" data-drag-region></div>
 
-  <div class="brand" data-tauri-drag-region>
+  <div class="brand" data-drag-region>
     <svg viewBox="0 0 32 32" width="22" height="22" aria-hidden="true">
       <rect x="4" y="13" width="3" height="6" rx="1.5" fill="currentColor" opacity=".9" />
       <rect x="9.5" y="9" width="3" height="14" rx="1.5" fill="currentColor" opacity=".9" />

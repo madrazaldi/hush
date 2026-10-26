@@ -1,7 +1,6 @@
-// Typed wrappers over the Tauri commands in src-tauri/src/commands.rs.
+// Typed wrappers over the backend commands in src/bun/backend/commands.ts.
 
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { invoke, listen, type UnlistenFn } from "./ipc";
 import type {
   AppInfo,
   CliStatus,

@@ -1,8 +1,8 @@
-// Dev-only stand-in for the Tauri IPC so the UI can run in a plain browser
+// Dev-only stand-in for the backend so the UI can run in a plain browser
 // (`bun run dev`, then open http://127.0.0.1:1427). Never bundled in builds.
 
 import settingsFixture from "./settings.json";
-import catalog from "../../../src-tauri/resources/models.json";
+import catalog from "../../../resources/models.json";
 import type { Dictation, Recording, RecordingSummary, Segment } from "#lib/types.js";
 
 type Cb = (payload: unknown) => void;
@@ -248,12 +248,10 @@ function toneUrl(ms: number) {
   return url;
 }
 
-const listeners = new Map<string, Map<number, Cb>>();
-const callbacks = new Map<number, Cb>();
-let nextId = 1;
+const listeners = new Map<string, Set<Cb>>();
 
 export function emit(event: string, payload: unknown) {
-  for (const id of listeners.get(event)?.keys() ?? []) callbacks.get(id)?.({ event, id, payload });
+  for (const cb of [...(listeners.get(event) ?? [])]) cb(payload);
 }
 
 const live = Date.now() - 754_000;
@@ -262,37 +260,30 @@ export function install() {
   const w = window as any;
   // `?onboarding` previews the first-run flow.
   if (new URLSearchParams(location.search).has("onboarding")) settings.general.onboarded = false;
-  w.__TAURI_INTERNALS__ = {
-    metadata: { currentWindow: { label: "main" }, currentWebview: { windowLabel: "main", label: "main" } },
-    transformCallback(cb: Cb) {
-      const id = nextId++;
-      callbacks.set(id, cb);
-      return id;
-    },
-    unregisterCallback(id: number) {
-      callbacks.delete(id);
-    },
-    // Fixture media paths don't exist; play a quiet tone of the right length instead.
-    convertFileSrc: (p: string) => toneUrl(recordings.find((r) => r.media_path === p || r.audio_path === p)?.duration_ms ?? 60_000),
+  // Shell-level commands (dialogs, clipboard, opener) that the real backend gets from the Electrobun shell.
+  const shellHandlers: Record<string, (a: any) => unknown> = {
+    dialog_open: () => null,
+    dialog_save: () => null,
+    dialog_ask: (a) => window.confirm(a.message),
+    opener_open_url: (a) => void window.open(a.url, "_blank"),
+    clipboard_write_text: (a) => void navigator.clipboard?.writeText(a.text),
+  };
+  w.__hushMock = {
     async invoke(cmd: string, args: any = {}) {
-      if (cmd === "plugin:event|listen") {
-        if (!listeners.has(args.event)) listeners.set(args.event, new Map());
-        listeners.get(args.event)!.set(args.handler, callbacks.get(args.handler)!);
-        return args.handler;
-      }
-      if (cmd.startsWith("plugin:")) return null;
-      const h = handlers[cmd];
+      const h = handlers[cmd] ?? shellHandlers[cmd];
       if (!h) {
         console.debug("[devmock] unhandled", cmd, args);
         return null;
       }
       return h(args);
     },
-  };
-  w.__TAURI_EVENT_PLUGIN_INTERNALS__ = {
-    unregisterListener(event: string, id: number) {
-      listeners.get(event)?.delete(id);
+    listen(event: string, cb: Cb) {
+      if (!listeners.has(event)) listeners.set(event, new Set());
+      listeners.get(event)!.add(cb);
+      return () => void listeners.get(event)?.delete(cb);
     },
+    // Fixture media paths don't exist; play a quiet tone of the right length instead.
+    mediaUrl: (p: string) => toneUrl(recordings.find((r) => r.media_path === p || r.audio_path === p)?.duration_ms ?? 60_000),
   };
   w.__hushEmit = emit;
   if (new URLSearchParams(location.search).has("live")) {
@@ -302,5 +293,5 @@ export function install() {
       emit("meeting:levels", { me: t % 40 < 18 ? 0.25 + Math.random() * 0.5 : 0.02, them: t % 40 >= 20 ? 0.2 + Math.random() * 0.5 : 0.02 });
     }, 80);
   }
-  console.info("[devmock] Tauri IPC mocked for browser preview");
+  console.info("[devmock] backend mocked for browser preview");
 }

@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { save } from "@tauri-apps/plugin-dialog";
-  import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+  import { save, writeText } from "#lib/ipc.js";
   import { api, errorText } from "#lib/api.js";
   import { app } from "#lib/state.svelte.js";
   import type { ExportOptions } from "#lib/types.js";

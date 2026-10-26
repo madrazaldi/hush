@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
-  import { ask } from "@tauri-apps/plugin-dialog";
+  import { ask } from "#lib/ipc.js";
   import { api, errorText, on, streamLlm } from "#lib/api.js";
   import { app } from "#lib/state.svelte.js";
   import { duration, relDate, languageName, LANGUAGES, words } from "#lib/format.js";

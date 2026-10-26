@@ -1,6 +1,6 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
-  import { open } from "@tauri-apps/plugin-dialog";
+  import { open } from "#lib/ipc.js";
   import { api, errorText, on } from "#lib/api.js";
   import { app } from "#lib/state.svelte.js";
   import { duration, relDate, LANGUAGES } from "#lib/format.js";

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+  import { writeText } from "#lib/ipc.js";
   import { api, errorText, streamLlm } from "#lib/api.js";
   import { app } from "#lib/state.svelte.js";
   import type { ChatMessage, Recipe } from "#lib/types.js";
