@@ -1,0 +1,21 @@
+{
+  // `electrobun/*` imports resolve through the SDK that `electrobun prepare` projects into .hutch/devkit.
+  "extends": "./.hutch/devkit/tsconfig.json",
+  // Type-checks the Electrobun main process (src/bun) and the dev scripts with Bun types.
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "types": ["bun"],
+    "strict": true,
+    "ignoreDeprecations": "6.0",
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/bun/**/*.ts", "src/lib/types.ts", "src/lib/ipc-schema.ts", "scripts/**/*.ts", "electrobun.config.ts"]
+}

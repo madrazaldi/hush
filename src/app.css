@@ -89,6 +89,12 @@ html.overlay body {
   background: transparent !important;
 }
 
+/* Draggable window chrome (Electrobun honours the CSS app-region). */
+[data-drag-region] {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
 ::selection {
   background: var(--hl);
 }

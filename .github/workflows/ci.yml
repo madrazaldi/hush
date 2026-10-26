@@ -5,57 +5,52 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # The release workflow runs these checks before it builds anything.
+  workflow_call:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  frontend:
-    name: Frontend (svelte-check, build)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: package.json
-      # Vite and svelte-check run on Node.
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-      - run: bun install --frozen-lockfile
-      - run: bun run check
-      - run: bun run build
-
-  rust:
-    name: Rust (fmt, clippy, tests)
+  app:
+    name: App (svelte-check, tsc, bun test, UI build)
+    # The audio tests shell out to /usr/bin/afconvert.
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
-      # Vite and svelte-check run on Node.
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
+      # The `prepare` hook projects the Electrobun SDK into .hutch/devkit.
+      - run: bun install --frozen-lockfile
+      - name: Check versions agree
+        run: bun scripts/version.ts
+      # svelte-check (0 errors, 0 warnings) for the UI, then tsc for the Bun side.
+      - run: bun run check
+      - run: bun run test
+      - run: bun run build:ui
+
+  native:
+    name: Native helper (fmt, clippy, tests)
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: native/hush-native
+    steps:
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
-      # tauri::generate_context! embeds the built frontend, so build it first.
-      - run: bun install --frozen-lockfile && bun run build
+          workspaces: native/hush-native
       - name: cargo fmt
-        working-directory: src-tauri
         run: cargo fmt --check
       - name: cargo clippy
-        working-directory: src-tauri
         run: cargo clippy --all-targets --locked -- -D warnings
       - name: cargo test
-        working-directory: src-tauri
-        run: cargo test --lib --locked
+        run: cargo test --locked

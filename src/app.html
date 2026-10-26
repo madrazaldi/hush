@@ -5,6 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Hush</title>
     <script>
+      // Electrobun serves the app as views://mainview/index.html; the router expects "/" (or "/overlay" in
+      // the dictation overlay window, which is told apart by the globals injected before this runs).
+      if (location.pathname === "/index.html") {
+        var to = window.__hush && window.__hush.window === "overlay" ? "/overlay" : "/";
+        history.replaceState(history.state, "", to + location.search + location.hash);
+      }
+    </script>
+    <script>
       // Apply the theme before first paint to avoid a flash.
       (function () {
         try {

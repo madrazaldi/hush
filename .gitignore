@@ -1,6 +1,10 @@
 .DS_Store
 node_modules
+# Electrobun's own output, and the SvelteKit static build that gets copied into the bundle.
 /build
+/dist
+/artifacts
+/.hutch
 /.svelte-kit
 /package
 .env
@@ -8,3 +12,6 @@ node_modules
 !.env.example
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+# Native helper build output.
+/native/hush-native/target/
+/native/bin/

@@ -1,8 +1,7 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
-  import { ask } from "@tauri-apps/plugin-dialog";
-  import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+  import { ask, writeText } from "#lib/ipc.js";
   import { api, errorText, on } from "#lib/api.js";
   import { app } from "#lib/state.svelte.js";
   import { clock, duration, relDate } from "#lib/format.js";

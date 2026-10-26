@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { ask } from "@tauri-apps/plugin-dialog";
-  import { openUrl } from "@tauri-apps/plugin-opener";
+  import { ask, openUrl } from "#lib/ipc.js";
   import { api, errorText } from "#lib/api.js";
   import { app } from "#lib/state.svelte.js";
   import { bytes } from "#lib/format.js";

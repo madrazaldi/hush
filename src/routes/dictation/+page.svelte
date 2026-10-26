@@ -1,7 +1,6 @@
 <script lang="ts">
   import { page } from "$app/state";
-  import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-  import { ask } from "@tauri-apps/plugin-dialog";
+  import { writeText, ask } from "#lib/ipc.js";
   import { api, errorText } from "#lib/api.js";
   import { app } from "#lib/state.svelte.js";
   import { dayGroup, groupBy, words } from "#lib/format.js";

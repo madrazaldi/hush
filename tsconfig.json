@@ -12,5 +12,6 @@
     "moduleResolution": "bundler"
   },
   "include": ["src", "*"],
-  "exclude": ["src-tauri", "build"]
+  // The Bun main process (src/bun), the dev scripts and electrobun.config.ts are checked by tsconfig.bun.json.
+  "exclude": ["node_modules", "src/bun", "scripts", "electrobun.config.ts", "native", "build", "dist", ".hutch"]
 }

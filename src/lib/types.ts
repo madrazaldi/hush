@@ -1,4 +1,4 @@
-// Mirrors of the Rust types serialized over IPC (see src-tauri/src).
+// Types shared by the UI and the backend (src/bun/backend), serialized over IPC.
 
 export type SttKind = "local" | "openai_compatible" | "xai" | "muse" | "deepgram" | "elevenlabs" | "assemblyai";
 export type LlmKind =

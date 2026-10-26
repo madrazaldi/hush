@@ -2,7 +2,7 @@
   import "../app.css";
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
-  import { getCurrentWebview } from "@tauri-apps/api/webview";
+  import { openUrl, uploadFile } from "#lib/ipc.js";
   import { api, errorText, on } from "#lib/api.js";
   import { app } from "#lib/state.svelte.js";
   import { MEDIA_EXTS } from "#lib/media.js";
@@ -21,34 +21,69 @@
     app.init();
     const offNav = on<string>("navigate", (route) => goto(route));
 
-    // Global drag & drop of media files onto the window.
-    let unDrop: (() => void) | undefined;
-    getCurrentWebview()
-      .onDragDropEvent(async (e) => {
-        const p = e.payload;
-        if (p.type === "enter" || p.type === "over") dropping = true;
-        else if (p.type === "leave") dropping = false;
-        else if (p.type === "drop") {
-          dropping = false;
-          const paths = p.paths.filter((x) => MEDIA_EXTS.includes(x.split(".").pop()?.toLowerCase() ?? ""));
-          if (!paths.length) {
-            if (p.paths.length) app.toast("error", "Those files aren't audio or video Hush can read.");
-            return;
-          }
-          try {
-            const recs = await api.addFiles(paths);
-            app.recordingsVersion++;
-            goto(recs.length === 1 ? `/files/${recs[0].id}` : "/files");
-          } catch (err) {
-            app.toast("error", errorText(err));
-          }
-        }
-      })
-      .then((u) => (unDrop = u));
+    // Global drag & drop of media files onto the window. The embedded browser doesn't expose the paths of
+    // dropped files, so each one is copied into Hush's media folder first and added from there.
+    let depth = 0;
+    const hasFiles = (e: DragEvent) => !!e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files");
+    const onEnter = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      depth++;
+      dropping = true;
+    };
+    const onOver = (e: DragEvent) => {
+      if (hasFiles(e)) e.preventDefault();
+    };
+    const onLeave = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) dropping = false;
+    };
+    const onDrop = async (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      depth = 0;
+      dropping = false;
+      const dropped = Array.from(e.dataTransfer?.files ?? []);
+      const files = dropped.filter((f) => MEDIA_EXTS.includes(f.name.split(".").pop()?.toLowerCase() ?? ""));
+      if (!files.length) {
+        if (dropped.length) app.toast("error", "Those files aren't audio or video Hush can read.");
+        return;
+      }
+      try {
+        const paths: string[] = [];
+        for (const f of files) paths.push(await uploadFile(f));
+        const recs = await api.addFiles(paths);
+        app.recordingsVersion++;
+        goto(recs.length === 1 ? `/files/${recs[0].id}` : "/files");
+      } catch (err) {
+        app.toast("error", errorText(err));
+      }
+    };
+    // Links to other sites (AI notes, sources) open in the default browser, never in this window: a page
+    // loaded here would get the same bridge to the backend as Hush itself.
+    const onClick = (e: MouseEvent) => {
+      const a = (e.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!a) return;
+      // Compared by protocol and host: views:// URLs have an opaque ("null") origin.
+      const u = new URL(a.href, location.href);
+      if (u.protocol === location.protocol && u.host === location.host) return;
+      e.preventDefault();
+      if (/^(https?:|mailto:)/i.test(a.href)) openUrl(a.href).catch((err) => app.toast("error", errorText(err)));
+    };
+    window.addEventListener("click", onClick, true);
+    window.addEventListener("dragenter", onEnter);
+    window.addEventListener("dragover", onOver);
+    window.addEventListener("dragleave", onLeave);
+    window.addEventListener("drop", onDrop);
 
     return () => {
       offNav();
-      unDrop?.();
+      window.removeEventListener("click", onClick, true);
+      window.removeEventListener("dragenter", onEnter);
+      window.removeEventListener("dragover", onOver);
+      window.removeEventListener("dragleave", onLeave);
+      window.removeEventListener("drop", onDrop);
     };
   });
 </script>
@@ -59,7 +94,7 @@
   <div class="shell">
     <Sidebar />
     <main>
-      <div class="drag" data-tauri-drag-region></div>
+      <div class="drag" data-drag-region></div>
       {#if app.settings}
         <MeetingBanner />
         {@render children()}

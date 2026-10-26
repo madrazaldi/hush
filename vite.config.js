@@ -1,39 +1,25 @@
 import { defineConfig } from "vite";
 import { sveltekit } from "@sveltejs/kit/vite";
 import adapter from "@sveltejs/adapter-static";
-// @ts-expect-error type error without @types/node package
-import process from "node:process";
-const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
-export default defineConfig(() => ({
+export default defineConfig({
   plugins: [
     sveltekit({
-      // Tauri has no Node server for SSR, so build a static SPA with an
-      // index.html fallback. See https://v2.tauri.app/start/frontend/sveltekit/
-      adapter: adapter({ fallback: "index.html" }),
+      // The app is a client-only SPA shown in an Electrobun window: adapter-static with a fallback to
+      // index.html (https://svelte.dev/docs/kit/single-page-apps). `dist/` is copied into the app bundle
+      // by electrobun.config.ts (`build/` is Electrobun's own output folder).
+      adapter: adapter({ pages: "dist", assets: "dist", fallback: "index.html" }),
     }),
   ],
 
-  // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
-  //
-  // 1. prevent Vite from obscuring rust errors
+  // Keep Vite from obscuring build errors.
   clearScreen: false,
-  // 2. tauri expects a fixed port, fail if that port is not available
+  // `bun run dev` serves the UI (backed by src/lib/devmock) on a fixed port; the Electrobun dev shell
+  // also finds it there.
   server: {
     port: 1427,
     strictPort: true,
-    host: host || "127.0.0.1",
-    hmr: host
-      ? {
-          protocol: "ws",
-          host,
-          port: 1428,
-        }
-      : undefined,
-    watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
-    },
+    host: "127.0.0.1",
   },
-}));
+});
