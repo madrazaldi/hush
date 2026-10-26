@@ -117,3 +117,6 @@ export function meetingAppsFor(bundleIds: string[]): string[] {
   }
   return out;
 }
+
+/** Escape a string for an AppleScript double-quoted literal. */
+export const asString = (s: string) => `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
