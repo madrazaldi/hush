@@ -2,7 +2,7 @@
   import "../app.css";
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
-  import { uploadFile } from "#lib/ipc.js";
+  import { openUrl, uploadFile } from "#lib/ipc.js";
   import { api, errorText, on } from "#lib/api.js";
   import { app } from "#lib/state.svelte.js";
   import { MEDIA_EXTS } from "#lib/media.js";
@@ -60,6 +60,18 @@
         app.toast("error", errorText(err));
       }
     };
+    // Links to other sites (AI notes, sources) open in the default browser, never in this window: a page
+    // loaded here would get the same bridge to the backend as Hush itself.
+    const onClick = (e: MouseEvent) => {
+      const a = (e.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!a) return;
+      // Compared by protocol and host: views:// URLs have an opaque ("null") origin.
+      const u = new URL(a.href, location.href);
+      if (u.protocol === location.protocol && u.host === location.host) return;
+      e.preventDefault();
+      if (/^(https?:|mailto:)/i.test(a.href)) openUrl(a.href).catch((err) => app.toast("error", errorText(err)));
+    };
+    window.addEventListener("click", onClick, true);
     window.addEventListener("dragenter", onEnter);
     window.addEventListener("dragover", onOver);
     window.addEventListener("dragleave", onLeave);
@@ -67,6 +79,7 @@
 
     return () => {
       offNav();
+      window.removeEventListener("click", onClick, true);
       window.removeEventListener("dragenter", onEnter);
       window.removeEventListener("dragover", onOver);
       window.removeEventListener("dragleave", onLeave);

@@ -106,6 +106,7 @@ export async function uploadFile(file: File): Promise<string> {
   if (m) return `/tmp/${file.name}`;
   const base = window.__hush?.mediaBase ?? "";
   const res = await fetch(`${base}/upload?name=${encodeURIComponent(file.name)}`, { method: "POST", body: file });
+  if (res.status === 413) throw new Error(`${file.name} is too large to import (over 4 GB)`);
   if (!res.ok) throw new Error(`Could not import ${file.name} (${res.status})`);
   return ((await res.json()) as { path: string }).path;
 }

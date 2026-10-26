@@ -40,6 +40,12 @@ async function pickUrl(path: string): Promise<string> {
   return "views://mainview/index.html";
 }
 
+// Only Hush's own pages may load in its windows: any page there can call every backend command (settings
+// with API keys included). Rules are globs, "^" blocks, the last match wins. External links go through
+// opener_open_url instead (see the click handler in +layout.svelte). Electrobun ignores the
+// `navigationRules` window option, so they are set on each webview after creation.
+const NAVIGATION_RULES = ["^*", "views://*", `${DEV_SERVER}/*`];
+
 const state = openApp();
 const media = startMediaServer({ isKnownMedia: (p) => state.db.mediaInUse(p) });
 
@@ -73,6 +79,7 @@ const win = new BrowserWindow({
 
 const overlayRpc = makeRpc();
 const overlay = createOverlay({ url: await pickUrl("/overlay"), preload: globals("overlay"), rpc: overlayRpc });
+for (const view of [win.webview, overlay.win.webview]) view.setNavigationRules(NAVIGATION_RULES);
 
 let quitting = false;
 let trayHandle: ReturnType<typeof createTray> | null = null;

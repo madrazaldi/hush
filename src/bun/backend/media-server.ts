@@ -18,6 +18,9 @@ export interface MediaServerOptions {
   isKnownMedia: (path: string) => boolean;
 }
 
+// Bun's default body limit (128 MiB) would turn away ordinary videos; this matches the URL download cap.
+const MAX_UPLOAD_BYTES = 4 * 2 ** 30;
+
 const CORS = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET, HEAD, POST, OPTIONS",
@@ -80,6 +83,7 @@ export function startMediaServer(opts: MediaServerOptions): MediaServer {
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
+    maxRequestBodySize: MAX_UPLOAD_BYTES,
     async fetch(req) {
       if (req.method === "OPTIONS") return reply(204);
       const url = new URL(req.url);

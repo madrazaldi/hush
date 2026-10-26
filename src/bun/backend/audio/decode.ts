@@ -5,6 +5,7 @@
 import { createWriteStream, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, extname, join } from "node:path";
+import { pipeline } from "node:stream/promises";
 import { log } from "../log";
 import { childEnv, which } from "../shell-env";
 import { SAMPLE_RATE, afconvert, parseWav } from "./wav";
@@ -158,20 +159,16 @@ export async function downloadUrl(url: string, destDir: string, signal?: AbortSi
       const len = Number(resp.headers.get("content-length") ?? 0);
       if (len > MAX_DOWNLOAD_BYTES) throw tooBig();
       const dest = join(destDir, `${stem}.${direct}`);
-      // Stream to disk rather than buffering the whole body in memory.
-      const file = createWriteStream(dest);
+      // Stream to disk rather than buffering the whole body in memory; pipeline() also reports write errors.
+      const body = (resp.body ?? []) as unknown as AsyncIterable<Uint8Array>;
       let written = 0;
-      try {
-        if (resp.body) {
-          for await (const chunk of resp.body as unknown as AsyncIterable<Uint8Array>) {
-            written += chunk.length;
-            if (written > MAX_DOWNLOAD_BYTES) throw tooBig();
-            if (!file.write(chunk)) await new Promise((r) => file.once("drain", r));
-          }
+      await pipeline(async function* () {
+        for await (const chunk of body) {
+          written += chunk.length;
+          if (written > MAX_DOWNLOAD_BYTES) throw tooBig();
+          yield chunk;
         }
-      } finally {
-        await new Promise((r) => file.end(r));
-      }
+      }, createWriteStream(dest));
       armed = false;
       return { path: dest, title: basename(pathPart) || "download" };
     }

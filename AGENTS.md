@@ -9,7 +9,7 @@ Use bun for everything JS (not npm/pnpm/yarn). Read `DESIGN.md` for the research
 ## Commands
 
 ```sh
-bun install                        # also runs `svelte-kit sync`
+bun install                        # also runs `svelte-kit sync` and `electrobun prepare`
 bun run dev                        # UI only in a browser, backed by src/lib/devmock (127.0.0.1:1427)
 bun run app:dev                    # full app: builds the helper + UI, then `electrobun dev`
 bun run app:build                  # release build: artifacts/ gets the .dmg and update files
@@ -23,7 +23,7 @@ bun run systap                     # system-audio tap smoke test (needs the perm
 ```
 
 Building the helper needs a Rust toolchain and CMake (transcribe-cpp compiles ggml with Metal). The
-first build is slow. `electrobun prepare` (run by `check`, `app:*`) projects the Electrobun SDK into
+first build is slow. `electrobun prepare` (run by `bun install`, `dev`, `check`, `app:*`) projects the Electrobun SDK into
 `.hutch/devkit`, which `tsconfig.bun.json` and the `#electrobun/view` import use.
 
 ## Layout

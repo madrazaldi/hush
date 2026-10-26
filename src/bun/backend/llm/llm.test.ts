@@ -120,3 +120,17 @@ test("cancelling aborts the request", async () => {
     server.stop(true);
   }
 });
+
+test("an already cancelled request never reaches the server", async () => {
+  let hits = 0;
+  const server = Bun.serve({ port: 0, fetch: () => (hits++, new Response("{}")) });
+  try {
+    const ctl = new AbortController();
+    ctl.abort();
+    const p = profile({ base_url: `http://localhost:${server.port}` });
+    await expect(complete(p, simpleRequest("", "q"), { signal: ctl.signal })).rejects.toThrow("cancelled");
+    expect(hits).toBe(0);
+  } finally {
+    server.stop(true);
+  }
+});

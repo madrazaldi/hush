@@ -42,6 +42,8 @@ function request(url: string, init: RequestInit, signal?: AbortSignal) {
   };
   const onAbort = () => ctl.abort(signal?.reason);
   signal?.addEventListener("abort", onAbort, { once: true });
+  // A signal aborted before this call never fires "abort".
+  if (signal?.aborted) onAbort();
   touch();
   const done = () => {
     clearTimeout(timer);

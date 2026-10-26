@@ -8,9 +8,9 @@
     "#electrobun/view": "./.hutch/devkit/api/browser/index.ts"
   },
   "scripts": {
-    "dev": "vite dev",
+    "dev": "electrobun prepare && vite dev",
     "build:ui": "vite build",
-    "prepare": "svelte-kit sync || echo ''",
+    "prepare": "(svelte-kit sync && electrobun prepare) || echo ''",
     "app:prepare": "electrobun prepare",
     "app:dev": "bun run build:native && electrobun prepare && vite build && electrobun dev",
     "app:build": "bun run build:native && electrobun prepare && vite build && electrobun build --env=stable",

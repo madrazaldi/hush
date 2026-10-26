@@ -5,6 +5,7 @@
 
 import { createWriteStream, existsSync, renameSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
+import { pipeline } from "node:stream/promises";
 import catalogJson from "../../../../resources/models.json";
 import type { CatalogModel, ModelStatus } from "../../../lib/types";
 import { log } from "../log";
@@ -117,24 +118,23 @@ async function fetchTo(url: string, part: string, m: CatalogModel, signal: Abort
   const resp = await fetch(url, { signal });
   if (!resp.ok || !resp.body) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
   const total = Math.max(1, Number(resp.headers.get("content-length")) || m.size_bytes);
-  const file = createWriteStream(part);
+  const body = resp.body as unknown as AsyncIterable<Uint8Array>;
   const hasher = new Bun.CryptoHasher("sha256");
   let done = 0;
   let lastReport = 0;
-  try {
-    for await (const chunk of resp.body as unknown as AsyncIterable<Uint8Array>) {
+  // pipeline() handles backpressure and turns write errors (disk full, unwritable folder) into a rejection.
+  await pipeline(async function* () {
+    for await (const chunk of body) {
       hasher.update(chunk);
-      if (!file.write(chunk)) await new Promise((r) => file.once("drain", r));
       done += chunk.length;
       const p = Math.min(done / total, 0.999);
       if (p - lastReport >= 0.005) {
         lastReport = p;
         onProgress(p);
       }
+      yield chunk;
     }
-  } finally {
-    await new Promise((r) => file.end(r));
-  }
+  }, createWriteStream(part));
   if (signal.aborted) throw new Error("cancelled");
   const digest = hasher.digest("hex");
   if (m.sha256 && digest !== m.sha256) throw new Error("checksum mismatch");

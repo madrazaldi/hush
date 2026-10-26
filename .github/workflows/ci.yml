@@ -18,7 +18,8 @@ permissions:
 jobs:
   app:
     name: App (svelte-check, tsc, bun test, UI build)
-    runs-on: ubuntu-latest
+    # The audio tests shell out to /usr/bin/afconvert.
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
