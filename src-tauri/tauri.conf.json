@@ -73,6 +73,7 @@
     ],
     "macOS": {
       "minimumSystemVersion": "14.2",
+      "signingIdentity": "Hush Local Signing",
       "entitlements": "Entitlements.plist",
       "infoPlist": "Info.plist"
     }
