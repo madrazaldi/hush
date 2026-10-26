@@ -10,7 +10,7 @@ use anyhow::{Result, anyhow};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use serde::Serialize;
 
-use super::{Resampler, to_mono};
+use crate::audio::{AudioCallback, Resampler, to_mono};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct InputDevice {
@@ -57,7 +57,7 @@ pub struct MicCapture {
 impl MicCapture {
     /// Start capturing. `on_audio` receives 16 kHz mono chunks on a worker thread.
     /// Returns once the device is actually running.
-    pub fn start(device: Option<&str>, mut on_audio: crate::audio::AudioCallback) -> Result<Self> {
+    pub fn start(device: Option<&str>, mut on_audio: AudioCallback) -> Result<Self> {
         let device = device.map(str::to_string);
         let (ready_tx, ready_rx) = mpsc::channel::<Result<String>>();
         let (stop_tx, stop_rx) = mpsc::channel::<()>();

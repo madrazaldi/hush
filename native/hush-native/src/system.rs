@@ -22,7 +22,7 @@ use cidre::{cat, cf, ns, os};
 use ringbuf::traits::{Consumer, Producer, Split};
 use ringbuf::{HeapCons, HeapProd, HeapRb};
 
-use crate::audio::Resampler;
+use crate::audio::{AudioCallback, Resampler};
 
 /// How often the worker thread drains the ring buffer.
 const DRAIN_INTERVAL: Duration = Duration::from_millis(20);
@@ -288,7 +288,7 @@ pub struct SystemAudioCapture {
 impl SystemAudioCapture {
     /// Start capturing all system output audio. `on_audio` receives 16 kHz mono f32 chunks
     /// (any size) on a background (non-realtime) thread.
-    pub fn start(mut on_audio: crate::audio::AudioCallback) -> Result<Self> {
+    pub fn start(mut on_audio: AudioCallback) -> Result<Self> {
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
         let (init_tx, init_rx) = mpsc::sync_channel::<Result<Arc<AtomicU64>>>(1);
 
