@@ -8,12 +8,12 @@ speech and LLM providers as opt-in.
 
 | Area | Decision | Why |
 |---|---|---|
-| Local ASR | `transcribe-cpp` (ggml, Metal) running Parakeet TDT v3 / Whisper GGUF, in the native helper | Handy migrated off ONNX to it; one CMake dep, no ORT dylib, covers Parakeet + Whisper + Silero VAD + Sortformer diarization |
+| Local ASR | transcribe.cpp (ggml, Metal) running Parakeet TDT v3 / Whisper GGUF, in the native helper through its C API | Handy migrated off ONNX to it; one CMake dep, no ORT dylib, covers Parakeet + Whisper + Silero VAD + Sortformer diarization |
 | Long audio | Split at silences into ≤ model-max windows, offset timestamps | Parakeet has a per-call audio cap; cloud APIs have 25 MB / 10 min caps |
-| Mic | `cpal` → mono → `rubato` to 16 kHz (helper) | Universal; matches every engine's input |
-| System audio (macOS) | Core Audio process tap + private aggregate device via `cidre` (14.2+) | Same as Hyprnote/anarlog & Meetily; needs only "System Audio Recording" permission; no screen-recording indicator |
+| Mic | AUHAL input unit → mono → windowed-sinc resampler to 16 kHz (helper) | Universal; matches every engine's input |
+| System audio (macOS) | Core Audio process tap (`CATapDescription`) + private aggregate device (14.2+) | Same as Hyprnote/anarlog & Meetily; needs only "System Audio Recording" permission; no screen-recording indicator |
 | Me / Them | Separate mic + system streams, transcribed independently | Speaker separation for free (Granola "Me/Them"); mic frames whose loudness envelope tracks the system audio (speaker bleed) are silenced before transcription (`audio/bleed.ts`), with a text-similarity check as backstop. Saved as stereo AAC `meeting.m4a` (L = mic, R = system, 48 kbps via `afconvert`) so re-transcription keeps the separation |
-| Hotkeys | `handy-keys` (CGEventTap) | Modifier-only + Fn support, press/release edges for push-to-talk |
+| Hotkeys | CGEventTap in the helper (spec grammar and matching from `handy-keys`) | Modifier-only + Fn support, press/release edges for push-to-talk |
 | Activation | Push-to-talk, toggle, and hybrid (short tap latches) | Handy/Wispr behaviour; Esc cancels |
 | Insertion | Clipboard + synthesized ⌘V with clipboard restore; fallback typing; copy-only | Universal; restore only if clipboard unchanged |
 | Overlay | Transparent click-through pill in a second Electrobun window with a non-activating panel style mask, shown without activating, all Spaces | Must never steal focus or the paste lands nowhere |
@@ -27,7 +27,7 @@ speech and LLM providers as opt-in.
 ## Architecture
 
 Three layers: a Chromium (CEF) webview showing a SvelteKit SPA, a TypeScript backend running on Bun in
-Electrobun's main process, and a small Rust helper for what needs native code.
+Electrobun's main process, and a small Swift helper for what needs native code.
 
 ```
 src/bun                  Bun process (the only place that imports electrobun/*)
@@ -54,23 +54,29 @@ src/bun                  Bun process (the only place that imports electrobun/*)
     ├── export.ts        Markdown, TXT, SRT, VTT, CSV, JSON
     └── ai.ts            prompts: dictation styles, note templates, summaries, chat (data in ai-data.ts)
 
-native/hush-native       Rust helper, spawned by native.ts, newline-delimited JSON-RPC 2.0 on stdio
-├── rpc.rs / methods.rs  transport and the method table
-├── capture.rs           capture sessions writing f32 files (rotated chunks for meetings)
-├── mic.rs, system.rs    cpal microphone, Core Audio process tap (cidre)
-├── stt.rs               transcribe-cpp engine and model cache
-├── hotkeys.rs           CGEventTap hotkeys (handy-keys)
-├── input.rs, pasteboard.rs   paste / typing / Return / selection via Core Graphics events
-└── perms.rs             microphone, accessibility, system-audio permission state
+native/hush-native       Swift helper (SwiftPM), spawned by native.ts, newline-delimited JSON-RPC 2.0 on stdio
+├── Sources/HushNative
+│   ├── RPC.swift / Methods.swift   transport and the method table
+│   ├── Capture.swift        capture sessions writing f32 files (rotated chunks for meetings)
+│   ├── Mic.swift, SystemAudio.swift   AUHAL microphone, Core Audio process tap
+│   ├── Pump.swift, Audio.swift        drain thread, resampling to 16 kHz, levels
+│   ├── STT.swift            transcribe.cpp engine and model cache
+│   ├── Keys.swift, Hotkeys.swift      hotkey specs and matching, CGEventTap
+│   ├── Input.swift, Pasteboard.swift  paste / typing / Return / selection via Core Graphics events
+│   └── Perms.swift          microphone, accessibility, system-audio permission state
+├── Sources/CHushAudio   realtime Core Audio callbacks and the lock-free ring they fill (C)
+├── Sources/CTranscribe  module map for transcribe.cpp's C API
+└── vendor/              transcribe.cpp, fetched and built with CMake by scripts/build-native.ts (not committed)
 ```
 
 ### Why the helper exists
 
-Everything that needs a real thread-safe native API stayed in Rust: audio capture (cpal, Core Audio tap),
-ggml/Metal speech-to-text, global hotkeys on a CGEventTap and keystroke / pasteboard synthesis. Bun has no
-FFI-free way to do those well, and the Metal teardown and CGEvent main-queue rules are already solved in the
-Rust code. Everything else (settings, SQLite, LLM and cloud STT clients, queues, exports, prompts, mixing,
-windowing) moved to TypeScript.
+Everything that needs a real thread-safe native API lives in the helper: audio capture (AUHAL, Core Audio
+tap), ggml/Metal speech-to-text, global hotkeys on a CGEventTap and keystroke / pasteboard synthesis. Bun has
+no FFI-free way to do those well. The helper is Swift because every one of them is a macOS framework API;
+the realtime audio callbacks are plain C so they never allocate or touch reference counts, and transcribe.cpp
+is linked through its C API. Everything else (settings, SQLite, LLM and cloud STT clients, queues, exports,
+prompts, mixing, windowing) is TypeScript.
 
 Protocol: requests `{id, method, params}`, replies `{id, result|error}`, events as notifications
 (`capture.level`, `capture.chunk`, `hotkey`). Methods: `ping`, `shutdown`, `capture.start/stop`, `stt.info/preload/evict/cancel/run`,

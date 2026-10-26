@@ -18,7 +18,8 @@
     "check": "svelte-kit sync && electrobun prepare && svelte-check --tsconfig ./tsconfig.json && tsc -p tsconfig.bun.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "test": "bun test src/bun",
-    "test:native": "cd native/hush-native && cargo test",
+    "test:native": "bun scripts/build-native.ts --deps-only && cd native/hush-native && swift test",
+    "lint:native": "cd native/hush-native && swift format lint --strict --recursive Sources Tests Package.swift",
     "transcribe": "bun scripts/transcribe.ts",
     "systap": "bun scripts/systap.ts",
     "llm": "bun scripts/llm.ts"

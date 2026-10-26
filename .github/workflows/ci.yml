@@ -35,22 +35,26 @@ jobs:
       - run: bun run build:ui
 
   native:
-    name: Native helper (fmt, clippy, tests)
+    name: Native helper (swift-format, build, tests)
     runs-on: macos-latest
-    defaults:
-      run:
-        working-directory: native/hush-native
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: oven-sh/setup-bun@v2
         with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+          bun-version-file: package.json
+      # transcribe.cpp (ggml + Metal) takes minutes to build; reuse it until the pinned version changes.
+      - uses: actions/cache@v4
         with:
-          workspaces: native/hush-native
-      - name: cargo fmt
-        run: cargo fmt --check
-      - name: cargo clippy
-        run: cargo clippy --all-targets --locked -- -D warnings
-      - name: cargo test
-        run: cargo test --locked
+          path: native/hush-native/vendor
+          key: transcribe-${{ runner.os }}-${{ hashFiles('scripts/build-native.ts') }}
+      - name: Build transcribe.cpp
+        run: bun scripts/build-native.ts --deps-only
+      - name: swift format
+        working-directory: native/hush-native
+        run: swift format lint --strict --recursive Sources Tests Package.swift
+      - name: swift build
+        working-directory: native/hush-native
+        run: swift build -Xswiftc -warnings-as-errors
+      - name: swift test
+        working-directory: native/hush-native
+        run: swift test

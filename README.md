@@ -49,7 +49,7 @@ Optional: `brew install ffmpeg yt-dlp` for more media formats and link imports.
 
 | | |
 |---|---|
-| On-device | [transcribe-cpp](https://crates.io/crates/transcribe-cpp) on Metal (in the native helper), using Parakeet TDT v2/v3, Whisper (base → large v3 turbo), Moonshine, SenseVoice, Canary, Qwen3-ASR and others. Models download from Settings → Speech. |
+| On-device | [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp) on Metal (in the native helper), using Parakeet TDT v2/v3, Whisper (base → large v3 turbo), Moonshine, SenseVoice, Canary, Qwen3-ASR and others. Models download from Settings → Speech. |
 | Cloud (BYOK) | OpenAI, Groq, Mistral, xAI Grok, Meta Muse, Deepgram, ElevenLabs, AssemblyAI, or any OpenAI-compatible `/audio/transcriptions` endpoint. |
 
 Dictation, Files and Meetings each choose their own engine.
@@ -65,9 +65,9 @@ AI is used for dictation polish, command mode, meeting notes, summaries, transla
 
 ## Development
 
-Requirements: macOS 14.2 or later (for system audio capture), [Bun](https://bun.sh), Rust and CMake (to build the native helper, which compiles transcribe-cpp). Optional: `ffmpeg` (more media formats) and `yt-dlp` (link imports).
+Requirements: macOS 14.2 or later (for system audio capture), [Bun](https://bun.sh), Xcode (Swift 6) and CMake (to build the native helper, which compiles transcribe.cpp). Optional: `ffmpeg` (more media formats) and `yt-dlp` (link imports).
 
-Hush is an [Electrobun](https://electrobun.dev) app: the window is the bundled Chromium (CEF), the backend is TypeScript on Bun, and a small Rust helper (`native/hush-native`) does audio capture, speech-to-text, global hotkeys and paste.
+Hush is an [Electrobun](https://electrobun.dev) app: the window is the bundled Chromium (CEF), the backend is TypeScript on Bun, and a small Swift helper (`native/hush-native`) does audio capture, speech-to-text, global hotkeys and paste.
 
 ```sh
 bun install
@@ -75,18 +75,18 @@ bun run app:dev         # the app (builds the helper and UI, then electrobun dev
 bun run app:build       # release build: .app, .dmg and update files in artifacts/
 bun run check           # svelte-check + tsc
 bun run test            # bun tests for the TypeScript backend
-cd native/hush-native && cargo test
+bun run test:native      # swift test for the native helper
 ```
 
 [AGENTS.md](AGENTS.md) has the code layout and conventions for contributors (human or AI).
 
 ### CI and releases
 
-- [CI](.github/workflows/ci.yml) runs on every push and pull request: `svelte-check`, `tsc`, the bun tests and the UI build, then `cargo fmt --check`, `clippy -D warnings` and the unit tests of the native helper on macOS.
-- [Release](.github/workflows/release.yml) runs when a `v*` tag is pushed. The tag must match `version` in `electrobun.config.ts` and `package.json` (`bun scripts/version.ts` checks they agree). It builds the Apple Silicon `.dmg` with `electrobun build` and publishes a GitHub release. Tags with a `-` (e.g. `v0.2.0-beta.1`) become pre-releases.
+- [CI](.github/workflows/ci.yml) runs on every push and pull request: `svelte-check`, `tsc`, the bun tests and the UI build, then `swift format lint --strict`, a warnings-as-errors `swift build` and the unit tests of the native helper on macOS.
+- [Release](.github/workflows/release.yml) runs when a `v*` tag is pushed. The tag must match `version` in `electrobun.config.ts`, `package.json` and `helperVersion` in `native/hush-native/Sources/HushNative/Methods.swift` (`bun scripts/version.ts` checks they agree). It builds the Apple Silicon `.dmg` with `electrobun build` and publishes a GitHub release. Tags with a `-` (e.g. `v0.2.0-beta.1`) become pre-releases.
 
   ```sh
-  # bump version in electrobun.config.ts, native/hush-native/Cargo.toml and package.json, then:
+  # bump version in electrobun.config.ts, package.json and helperVersion in Methods.swift, then:
   git tag v0.2.0 && git push origin v0.2.0
   ```
 

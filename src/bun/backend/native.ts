@@ -39,16 +39,14 @@ export interface NativeEvents {
   hotkey: { action: HotkeyAction; pressed: boolean };
 }
 
-/** Where the helper lives: env override, the packaged app, then a local cargo build. */
+/** Where the helper lives: env override, the packaged app, then the one `bun run build:native` staged. */
 export function resolveNativeBin(): string | null {
   const cands: string[] = [];
   if (process.env.HUSH_NATIVE_BIN) cands.push(process.env.HUSH_NATIVE_BIN);
   // Packaged: Contents/Resources/app/bun/index.js next to Contents/Resources/app/native/hush-native.
   cands.push(join(import.meta.dir, "../native/hush-native"), join(import.meta.dir, "../../native/hush-native"));
-  // Source tree (dev, tests, scripts): <repo>/native/hush-native/target/{release,debug}.
-  for (let d = import.meta.dir, i = 0; i < 6; i++, d = dirname(d)) {
-    cands.push(join(d, "native/hush-native/target/release/hush-native"), join(d, "native/hush-native/target/debug/hush-native"));
-  }
+  // Source tree (dev, tests, scripts): <repo>/native/bin/hush-native.
+  for (let d = import.meta.dir, i = 0; i < 6; i++, d = dirname(d)) cands.push(join(d, "native/bin/hush-native"));
   return cands.find((p) => existsSync(p)) ?? null;
 }
 
@@ -94,7 +92,7 @@ export class Native {
     const bin = this.binPath();
     if (!bin) throw new Error("The Hush native helper is missing (hush-native). Rebuild the app.");
     this.stopping = false;
-    const proc = Bun.spawn([bin], { stdin: "pipe", stdout: "pipe", stderr: "pipe", env: { ...process.env, RUST_LOG: process.env.RUST_LOG ?? "info" } });
+    const proc = Bun.spawn([bin], { stdin: "pipe", stdout: "pipe", stderr: "pipe", env: { ...process.env, HUSH_NATIVE_LOG: process.env.HUSH_NATIVE_LOG ?? (process.env.HUSH_DEBUG === "1" ? "debug" : "info") } });
     this.proc = proc;
     const restarted = this.starts++ > 0;
     log.info(`native helper started (pid ${proc.pid})`);

@@ -1,0 +1,10 @@
+module CTranscribe [system] {
+    header "../../vendor/transcribe/include/transcribe.h"
+    link "transcribe"
+    link "ggml"
+    link "ggml-cpu"
+    link "ggml-metal"
+    link "ggml-base"
+    link "c++"
+    export *
+}

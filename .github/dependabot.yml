@@ -15,10 +15,3 @@ updates:
       # SvelteKit 3 declares a typescript ^6 peer dependency.
       - dependency-name: typescript
         update-types: ["version-update:semver-major"]
-  - package-ecosystem: cargo
-    directory: /native/hush-native
-    schedule:
-      interval: monthly
-    groups:
-      cargo:
-        patterns: ["*"]
