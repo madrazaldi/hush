@@ -60,12 +60,12 @@ test("trim silence and voice detection", () => {
   expect(hasVoice(new Float32Array(SAMPLE_RATE))).toBe(false);
 });
 
-test("stereo aac round trip through afconvert", () => {
+test("stereo aac round trip through afconvert", async () => {
   const dir = tmp();
   const l = Int16Array.from(tone(1), (x) => x * 32767);
   const r = Int16Array.from(tone(1, 880), (x) => x * 32767);
   const out = join(dir, "m.m4a");
-  writeStereoAac(out, l, r, SAMPLE_RATE, 48000);
+  await writeStereoAac(out, l, r, SAMPLE_RATE, 48000);
   const [bl, br] = readTracks(out);
   expect(br).not.toBeNull();
   expect(Math.abs(bl.length - l.length)).toBeLessThan(SAMPLE_RATE * 0.1);

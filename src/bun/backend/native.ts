@@ -60,6 +60,7 @@ export class Native {
   private pending = new Map<number, Pending>();
   private handlers = new Map<string, Set<(p: any) => void>>();
   private restartHandlers = new Set<() => void>();
+  private crashHandlers = new Set<() => void>();
   private stopping = false;
   private starts = 0;
 
@@ -76,6 +77,12 @@ export class Native {
   onRestart(fn: () => void): () => void {
     this.restartHandlers.add(fn);
     return () => this.restartHandlers.delete(fn);
+  }
+
+  /** Called when the helper dies without being asked to stop (captures in flight are lost). */
+  onCrash(fn: () => void): () => void {
+    this.crashHandlers.add(fn);
+    return () => this.crashHandlers.delete(fn);
   }
 
   get running(): boolean {
@@ -168,6 +175,7 @@ export class Native {
       p.reject(err);
       this.pending.delete(id);
     }
+    if (!this.stopping) for (const f of this.crashHandlers) f();
   }
 
   call<T = any>(method: string, params: unknown = {}, opts: { timeoutMs?: number } = {}): Promise<T> {
@@ -238,6 +246,10 @@ export class Native {
 }
 
 let shared: Native | null = null;
+/** Replace the process-wide client (tests use a fake that never touches a device). */
+export function setNative(n: Native | null): void {
+  shared = n;
+}
 /** The process-wide helper client. */
 export function native(): Native {
   shared ??= new Native();

@@ -120,6 +120,12 @@ export function parseWav(buf: Uint8Array): WavData {
   throw new Error("WAV has no data chunk");
 }
 
+export async function afconvertAsync(args: string[]): Promise<void> {
+  const p = Bun.spawn(["/usr/bin/afconvert", ...args], { stdin: "ignore", stdout: "ignore", stderr: "pipe" });
+  const err = new Response(p.stderr).text();
+  if ((await p.exited) !== 0) throw new Error(`afconvert failed: ${(await err).trim()}`);
+}
+
 export function afconvert(args: string[]): void {
   const r = Bun.spawnSync(["/usr/bin/afconvert", ...args], { stdout: "ignore", stderr: "pipe" });
   if (r.exitCode !== 0) throw new Error(`afconvert failed: ${r.stderr.toString().trim()}`);
@@ -156,17 +162,11 @@ export function readTracks(path: string): [Int16Array, Int16Array | null] {
  * Write stereo 16-bit tracks (padded to equal length) as AAC in an M4A container via afconvert,
  * about a sixth the size of the 16-bit WAV.
  */
-export function writeStereoAac(path: string, left: Int16Array, right: Int16Array, rate: number, bitrate: number): void {
+export async function writeStereoAac(path: string, left: Int16Array, right: Int16Array, rate: number, bitrate: number): Promise<void> {
   const wav = path.replace(/\.[^./]*$/, "") + ".tmp.wav";
   try {
-    const frames = Math.max(left.length, right.length);
-    const body = Buffer.alloc(frames * 4);
-    for (let i = 0; i < frames; i++) {
-      body.writeInt16LE(left[i] ?? 0, i * 4);
-      body.writeInt16LE(right[i] ?? 0, i * 4 + 2);
-    }
-    writeFileSync(wav, Buffer.concat([wavHeader(body.length, rate, 2), body]));
-    afconvert([wav, "-o", path, "-f", "m4af", "-d", "aac", "-b", String(bitrate)]);
+    writeFileSync(wav, stereoWavBytes(left, right, rate));
+    await afconvertAsync([wav, "-o", path, "-f", "m4af", "-d", "aac", "-b", String(bitrate)]);
   } finally {
     rmSync(wav, { force: true });
   }
@@ -226,6 +226,27 @@ export function trimSilence(pcm: Float32Array): Float32Array {
 /** True if the buffer contains any meaningful speech-level energy. */
 export function hasVoice(pcm: Float32Array): boolean {
   return trimSilence(pcm).length > 0 && pcm.length > SAMPLE_RATE / 4;
+}
+
+/** RMS level in 0..1 (roughly perceptual, for meters): about -60 dB..0 dB mapped to 0..1. */
+export function level(pcm: Float32Array): number {
+  if (pcm.length === 0) return 0;
+  let e = 0;
+  for (let i = 0; i < pcm.length; i++) e += pcm[i] * pcm[i];
+  const rms = Math.sqrt(e / pcm.length);
+  const db = 20 * Math.log10(Math.max(rms, 1e-6));
+  return Math.max(0, Math.min(1, (db + 60) / 60));
+}
+
+/** Stereo 16-bit WAV bytes (shorter channel padded with silence). */
+export function stereoWavBytes(left: Int16Array, right: Int16Array, rate: number): Buffer {
+  const frames = Math.max(left.length, right.length);
+  const body = Buffer.alloc(frames * 4);
+  for (let i = 0; i < frames; i++) {
+    body.writeInt16LE(left[i] ?? 0, i * 4);
+    body.writeInt16LE(right[i] ?? 0, i * 4 + 2);
+  }
+  return Buffer.concat([wavHeader(body.length, rate, 2), body]);
 }
 
 /** Read a raw little-endian f32 file (the helper's capture format) into samples. */
