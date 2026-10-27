@@ -4,7 +4,14 @@
   import { app } from "#lib/state.svelte.js";
   import { dayGroup, duration, groupBy } from "#lib/format.js";
   import type { RecordingSummary } from "#lib/types.js";
-  import { Mic, NotebookPen, Search, Star, Radar } from "@lucide/svelte";
+  import Page from "#lib/components/Page.svelte";
+  import PageHeader from "#lib/components/PageHeader.svelte";
+  import { Button } from "#lib/components/ui/button/index.js";
+  import { Badge } from "#lib/components/ui/badge/index.js";
+  import * as InputGroup from "#lib/components/ui/input-group/index.js";
+  import * as Item from "#lib/components/ui/item/index.js";
+  import * as Empty from "#lib/components/ui/empty/index.js";
+  import { Mic, NotebookPen, Search, Star, Radar, Users, ArrowRight } from "@lucide/svelte";
 
   let items = $state<RecordingSummary[]>([]);
   let query = $state("");
@@ -39,129 +46,73 @@
   }
 </script>
 
-<div class="page">
-  <div class="page-narrow">
-    <div class="page-head">
-      <div>
-        <h1>Meetings</h1>
-        <p class="sub">Jot what matters; Hush listens to both sides and turns it into clean notes. No bot joins your call.</p>
-      </div>
-      <div class="row">
-        <button class="btn" onclick={note}><NotebookPen size={14} /> New note</button>
-        {#if app.meeting}
-          <button class="btn primary" onclick={() => goto(`/meetings/${app.meeting!.id}`)}><span class="dot live"></span> Recording…</button>
-        {:else}
-          <button class="btn primary" onclick={record} disabled={starting}><Mic size={14} /> Record now</button>
-        {/if}
-      </div>
-    </div>
+<Page>
+  <PageHeader title="Meetings" description="Jot what matters; Hush listens to both sides and turns it into clean notes. No bot joins your call.">
+    {#snippet actions()}
+      <Button variant="outline" onclick={note}><NotebookPen /> New note</Button>
+      {#if app.meeting}
+        <Button onclick={() => goto(`/meetings/${app.meeting!.id}`)}>
+          <span class="size-1.5 animate-pulse-ring rounded-full bg-primary-foreground"></span> Recording…
+        </Button>
+      {:else}
+        <Button onclick={record} disabled={starting}><Mic /> Record now</Button>
+      {/if}
+    {/snippet}
+  </PageHeader>
 
-    {#if !s.meetings.detect_meetings}
-      <button class="tip" onclick={() => { s.meetings.detect_meetings = true; app.save(); }}>
-        <Radar size={15} />
-        <span>Turn on meeting detection to get a nudge when Zoom, Meet, Teams or FaceTime starts using your mic.</span>
-        <b>Enable</b>
-      </button>
-    {/if}
+  {#if !s.meetings.detect_meetings}
+    <button
+      class="group mb-8 flex w-full items-center gap-3 rounded-xl border border-dashed bg-muted/30 py-3 pr-3 pl-3.5 text-left text-sm text-muted-foreground transition-colors hover:border-ember/40 hover:bg-ember-soft/50"
+      onclick={() => {
+        s.meetings.detect_meetings = true;
+        app.save();
+      }}
+    >
+      <div class="grid size-8 shrink-0 place-items-center rounded-lg bg-background text-ember-text shadow-xs ring-1 ring-border"><Radar class="size-4" /></div>
+      <span class="flex-1">Turn on meeting detection to get a nudge when Zoom, Meet, Teams or FaceTime starts using your mic.</span>
+      <span class="flex items-center gap-1 text-xs font-semibold text-ember-text">Enable <ArrowRight class="size-3.5 transition-transform group-hover:translate-x-0.5" /></span>
+    </button>
+  {/if}
 
-    <div class="row tools">
-      <div class="search spacer">
-        <Search size={14} />
-        <input class="input" placeholder="Search meetings, notes and transcripts" bind:value={query} />
-      </div>
-    </div>
+  <InputGroup.Root class="mb-2 h-9">
+    <InputGroup.Addon><Search /></InputGroup.Addon>
+    <InputGroup.Input placeholder="Search meetings, notes and transcripts" bind:value={query} />
+  </InputGroup.Root>
 
-    {#each groups as [day, list]}
-      <h4 class="eyebrow day">{day}</h4>
-      {#each list as r (r.id)}
-        <a class="item" href={`/meetings/${r.id}`}>
-          <div class="when mono faint">{new Date(r.created_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</div>
-          <div class="main">
-            <div class="row">
-              <b>{r.title}</b>
-              {#if r.starred}<Star size={12} fill="currentColor" class="star" />{/if}
-              {#if r.status === "recording"}<span class="chip ember"><span class="dot live"></span> Live</span>{/if}
-              {#if r.status === "processing"}<span class="chip">Finishing…</span>{/if}
-            </div>
-            <span class="preview faint small">{r.preview || (r.status === "recording" ? "Listening…" : "No transcript")}</span>
-          </div>
-          {#if r.duration_ms}<span class="faint small">{duration(r.duration_ms)}</span>{/if}
-        </a>
+  {#each groups as [day, list]}
+    <h4 class="mt-7 mb-2 px-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">{day}</h4>
+    <Item.Group class="gap-0 overflow-hidden rounded-xl border bg-card">
+      {#each list as r, i (r.id)}
+        <Item.Root class="gap-4 rounded-none border-0 px-4 py-3 {i ? 'border-t border-border' : ''} hover:bg-muted/50">
+          {#snippet child({ props })}
+            <a href={`/meetings/${r.id}`} {...props}>
+              <span class="w-16 shrink-0 font-mono text-[11.5px] text-muted-foreground tabular-nums">
+                {new Date(r.created_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+              </span>
+              <Item.Content class="min-w-0 gap-0.5">
+                <Item.Title class="w-full">
+                  <span class="truncate">{r.title}</span>
+                  {#if r.starred}<Star class="size-3 shrink-0 text-amber" fill="currentColor" />{/if}
+                  {#if r.status === "recording"}
+                    <Badge class="bg-ember-soft text-ember-text"><span class="size-1.5 animate-pulse-ring rounded-full bg-ember"></span> Live</Badge>
+                  {/if}
+                  {#if r.status === "processing"}<Badge variant="secondary">Finishing…</Badge>{/if}
+                </Item.Title>
+                <span class="truncate text-xs text-muted-foreground">{r.preview || (r.status === "recording" ? "Listening…" : "No transcript")}</span>
+              </Item.Content>
+              {#if r.duration_ms}<span class="shrink-0 text-xs text-muted-foreground tabular-nums">{duration(r.duration_ms)}</span>{/if}
+            </a>
+          {/snippet}
+        </Item.Root>
       {/each}
-    {:else}
-      <div class="empty">
-        <h3>{query ? "No matches" : "No meetings yet"}</h3>
-        <p>{query ? "Try a different search." : "Hit Record when your next call starts, and type notes as you go."}</p>
-      </div>
-    {/each}
-  </div>
-</div>
-
-<style>
-  .tip {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 18px;
-    padding: 10px 14px;
-    border-radius: var(--r);
-    border: 1px dashed var(--line-2);
-    background: none;
-    color: var(--text-2);
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-  }
-  .tip span {
-    flex: 1;
-  }
-  .tip b {
-    color: var(--ember-text);
-    font-weight: 600;
-  }
-  .tools {
-    margin-bottom: 4px;
-  }
-  .day {
-    margin: 22px 0 4px;
-  }
-  .item {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    padding: 12px 10px;
-    margin: 0 -10px;
-    border-radius: var(--r);
-    color: inherit;
-  }
-  .item:hover {
-    background: var(--surface);
-  }
-  .when {
-    width: 64px;
-    flex: none;
-    font-size: 11.5px;
-  }
-  .main {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-  .main b {
-    font-weight: 550;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .main :global(.star) {
-    color: var(--amber);
-  }
-  .preview {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-</style>
+    </Item.Group>
+  {:else}
+    <Empty.Root class="mt-6 rounded-xl border border-dashed py-14">
+      <Empty.Header>
+        <Empty.Media variant="icon">{#if query}<Search />{:else}<Users />{/if}</Empty.Media>
+        <Empty.Title>{query ? "No matches" : "No meetings yet"}</Empty.Title>
+        <Empty.Description>{query ? "Try a different search." : "Hit Record when your next call starts, and type notes as you go."}</Empty.Description>
+      </Empty.Header>
+    </Empty.Root>
+  {/each}
+</Page>

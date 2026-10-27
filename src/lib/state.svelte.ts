@@ -1,9 +1,10 @@
 // App-wide reactive state shared by the main window's routes.
 
+import { toast } from "svelte-sonner";
 import { api, errorText, on } from "./api";
 import type { AppInfo, MeetingStatus, ModelStatus, Permissions, Settings } from "./types";
 
-export type Toast = { id: number; kind: "info" | "error" | "success"; text: string; action?: { label: string; run: () => void } };
+export type Toast = { kind: "info" | "error" | "success"; text: string; action?: { label: string; run: () => void } };
 
 class AppStore {
   settings = $state<Settings | null>(null);
@@ -11,14 +12,12 @@ class AppStore {
   permissions = $state<Permissions | null>(null);
   meeting = $state<MeetingStatus | null>(null);
   models = $state<ModelStatus[]>([]);
-  toasts = $state<Toast[]>([]);
   detectedApp = $state<string | null>(null);
   /** Bumped whenever recordings change, so lists can refetch. */
   recordingsVersion = $state(0);
   dictationsVersion = $state(0);
 
   #saveTimer: ReturnType<typeof setTimeout> | undefined;
-  #toastId = 0;
   #started = false;
 
   async init() {
@@ -93,12 +92,10 @@ class AppStore {
   }
 
   toast(kind: Toast["kind"], text: string, action?: Toast["action"]) {
-    const id = ++this.#toastId;
-    this.toasts.push({ id, kind, text, action });
-    setTimeout(() => this.dismiss(id), kind === "error" ? 7000 : 4000);
-  }
-  dismiss(id: number) {
-    this.toasts = this.toasts.filter((t) => t.id !== id);
+    toast[kind](text, {
+      duration: kind === "error" ? 7000 : 4000,
+      action: action && { label: action.label, onClick: action.run },
+    });
   }
 
   sttName(id: string | null | undefined): string {

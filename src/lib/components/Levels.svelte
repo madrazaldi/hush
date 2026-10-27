@@ -9,7 +9,7 @@
       <i class:on={active && level * BARS > i + 0.15} style:height="{5 + Math.sin(((i + 0.5) / BARS) * Math.PI) * 9}px"></i>
     {/each}
   </span>
-  <span class="small">{label}</span>
+  <span class="text-xs">{label}</span>
 </div>
 
 <style>
@@ -17,7 +17,7 @@
     display: flex;
     align-items: center;
     gap: 7px;
-    color: var(--text-2);
+    color: var(--muted-foreground);
   }
   .lv.off {
     opacity: 0.45;
@@ -31,7 +31,7 @@
   i {
     width: 3px;
     border-radius: 2px;
-    background: var(--line-2);
+    background: var(--input);
     transition: background 0.08s;
   }
   [data-tone="ember"] i.on {

@@ -5,6 +5,7 @@
   import { app } from "#lib/state.svelte.js";
   import type { ChatMessage, Recipe } from "#lib/types.js";
   import Markdown from "./Markdown.svelte";
+  import { Button } from "#lib/components/ui/button/index.js";
   import { ArrowUp, Copy, Eraser, Square, Sparkles } from "@lucide/svelte";
 
   let {
@@ -83,24 +84,30 @@
   });
 </script>
 
-<div class="chat">
-  <div class="scroll" bind:this={scroller}>
+{#snippet chip(text: string, run: () => void)}
+  <button
+    class="rounded-full border bg-background px-2.5 py-1 text-left text-xs text-muted-foreground transition-colors hover:border-ember/40 hover:bg-ember-soft hover:text-ember-text"
+    onclick={run}>{text}</button
+  >
+{/snippet}
+
+<div class="flex h-full min-h-0 flex-col">
+  <div class="flex flex-1 flex-col gap-4 overflow-y-auto px-0.5 pt-1 pb-3" bind:this={scroller}>
     {#if !messages.length && pending === null}
-      <div class="intro">
-        <Sparkles size={18} />
-        <p class="muted small">Ask anything about this transcript. Answers come from {llmName}.</p>
+      <div class="flex flex-col gap-3 py-2">
+        <div class="grid size-9 place-items-center rounded-lg bg-ember-soft text-ember-text"><Sparkles class="size-4" /></div>
+        <div>
+          <p class="text-sm font-medium">Ask about this transcript</p>
+          <p class="mt-0.5 text-xs text-muted-foreground">Answers come from {llmName}.</p>
+        </div>
         {#if recipes.length}
-          <div class="chips">
-            {#each recipes as r}
-              <button class="chip" onclick={() => send(r.prompt, r.id)}>{r.name}</button>
-            {/each}
+          <div class="flex flex-wrap gap-1.5">
+            {#each recipes as r}{@render chip(r.name, () => send(r.prompt, r.id))}{/each}
           </div>
         {/if}
         {#if suggestions.length}
-          <div class="chips">
-            {#each suggestions as q}
-              <button class="chip" onclick={() => send(q)}>{q}</button>
-            {/each}
+          <div class="flex flex-wrap gap-1.5">
+            {#each suggestions as q}{@render chip(q, () => send(q))}{/each}
           </div>
         {/if}
       </div>
@@ -108,41 +115,49 @@
 
     {#each messages as m}
       {#if m.role === "user"}
-        <div class="q">{recipeByPrompt.get(m.content) ?? m.content}</div>
+        <div class="selectable max-w-[88%] self-end rounded-2xl rounded-br-md bg-muted px-3 py-2 text-[13px] whitespace-pre-wrap">
+          {recipeByPrompt.get(m.content) ?? m.content}
+        </div>
       {:else}
-        <div class="a">
-          <Markdown source={m.content} />
-          <button class="btn icon sm ghost copy" title="Copy" onclick={() => writeText(m.content).then(() => app.toast("success", "Copied"))}>
-            <Copy size={12} />
-          </button>
+        <div class="group/a relative">
+          <Markdown source={m.content} class="text-[13.5px]" />
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            class="absolute -right-1 -bottom-2 text-muted-foreground opacity-0 group-hover/a:opacity-100"
+            title="Copy"
+            onclick={() => writeText(m.content).then(() => app.toast("success", "Copied"))}
+          >
+            <Copy />
+          </Button>
         </div>
       {/if}
     {/each}
     {#if pending !== null}
-      <div class="q">{recipeByPrompt.get(pending) ?? pending}</div>
-      <div class="a">
-        {#if streaming}<Markdown source={streaming} />{:else}<span class="typing"><i></i><i></i><i></i></span>{/if}
+      <div class="selectable max-w-[88%] self-end rounded-2xl rounded-br-md bg-muted px-3 py-2 text-[13px] whitespace-pre-wrap">
+        {recipeByPrompt.get(pending) ?? pending}
+      </div>
+      <div>
+        {#if streaming}<Markdown source={streaming} class="text-[13.5px]" />{:else}<span class="typing inline-flex gap-1 py-1.5"><i></i><i></i><i></i></span>{/if}
       </div>
     {/if}
   </div>
 
   {#if messages.length && recipes.length && streaming === null}
-    <div class="chips more">
-      {#each recipes.slice(0, 4) as r}
-        <button class="chip" onclick={() => send(r.prompt, r.id)}>{r.name}</button>
-      {/each}
+    <div class="flex flex-wrap gap-1.5 py-2">
+      {#each recipes.slice(0, 4) as r}{@render chip(r.name, () => send(r.prompt, r.id))}{/each}
     </div>
   {/if}
 
   <form
-    class="box"
+    class="flex items-end gap-1 rounded-xl border bg-background p-1.5 pl-3 shadow-xs transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/20"
     onsubmit={(e) => {
       e.preventDefault();
       send(input);
     }}
   >
     <textarea
-      class="selectable"
+      class="selectable field-sizing-content max-h-36 min-h-7 flex-1 resize-none bg-transparent py-1 text-sm outline-none placeholder:text-muted-foreground"
       rows="1"
       placeholder="Ask about this transcript…"
       bind:value={input}
@@ -154,94 +169,22 @@
       }}
     ></textarea>
     {#if streaming !== null}
-      <button type="button" class="btn icon sm" title="Stop" onclick={() => api.cancelLlm(requestId)}><Square size={11} fill="currentColor" /></button>
+      <Button type="button" variant="secondary" size="icon-sm" title="Stop" onclick={() => api.cancelLlm(requestId)}><Square class="size-3" fill="currentColor" /></Button>
     {:else}
       {#if messages.length}
-        <button type="button" class="btn icon sm ghost" title="Clear chat" onclick={clear}><Eraser size={14} /></button>
+        <Button type="button" variant="ghost" size="icon-sm" class="text-muted-foreground" title="Clear chat" onclick={clear}><Eraser /></Button>
       {/if}
-      <button class="btn icon sm primary" title="Send" disabled={!input.trim()}><ArrowUp size={14} /></button>
+      <Button type="submit" size="icon-sm" title="Send" disabled={!input.trim()}><ArrowUp /></Button>
     {/if}
   </form>
 </div>
 
 <style>
-  .chat {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    min-height: 0;
-  }
-  .scroll {
-    flex: 1;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    padding: 4px 2px 12px;
-  }
-  .intro {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding: 8px 2px;
-  }
-  .intro > :global(svg) {
-    color: var(--ember-text);
-  }
-  .chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-  .chips .chip {
-    height: 26px;
-    cursor: pointer;
-    font: inherit;
-    font-size: 12px;
-  }
-  .chips .chip:hover {
-    color: var(--text);
-    border-color: var(--line-2);
-  }
-  .more {
-    padding: 6px 0;
-  }
-  .q {
-    align-self: flex-end;
-    max-width: 88%;
-    padding: 8px 12px;
-    border-radius: 14px 14px 4px 14px;
-    background: var(--surface-3);
-    font-size: 13px;
-    white-space: pre-wrap;
-    user-select: text;
-    -webkit-user-select: text;
-  }
-  .a {
-    position: relative;
-  }
-  .a :global(.prose) {
-    font-size: 13.5px;
-  }
-  .copy {
-    position: absolute;
-    right: -4px;
-    bottom: -6px;
-    opacity: 0;
-  }
-  .a:hover .copy {
-    opacity: 1;
-  }
-  .typing {
-    display: inline-flex;
-    gap: 4px;
-    padding: 6px 0;
-  }
   .typing i {
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: var(--text-3);
+    background: var(--muted-foreground);
     animation: bounce 1.2s infinite;
   }
   .typing i:nth-child(2) {
@@ -255,33 +198,5 @@
       transform: translateY(-4px);
       background: var(--ember);
     }
-  }
-  .box {
-    display: flex;
-    align-items: flex-end;
-    gap: 6px;
-    padding: 6px 6px 6px 12px;
-    border-radius: var(--r);
-    border: 1px solid var(--line-2);
-    background: var(--surface);
-  }
-  .box:focus-within {
-    border-color: color-mix(in srgb, var(--ember) 55%, transparent);
-  }
-  .box textarea {
-    flex: 1;
-    min-height: 26px;
-    max-height: 140px;
-    padding: 4px 0;
-    border: 0;
-    outline: 0;
-    resize: none;
-    background: none;
-    color: var(--text);
-    font: inherit;
-    field-sizing: content;
-  }
-  .box textarea::placeholder {
-    color: var(--text-3);
   }
 </style>

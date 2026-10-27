@@ -12,6 +12,13 @@
   import Markdown from "#lib/components/Markdown.svelte";
   import ExportMenu from "#lib/components/ExportMenu.svelte";
   import Levels from "#lib/components/Levels.svelte";
+  import { Button } from "#lib/components/ui/button/index.js";
+  import { Badge } from "#lib/components/ui/badge/index.js";
+  import { Textarea } from "#lib/components/ui/textarea/index.js";
+  import * as Tabs from "#lib/components/ui/tabs/index.js";
+  import * as Select from "#lib/components/ui/select/index.js";
+  import * as DropdownMenu from "#lib/components/ui/dropdown-menu/index.js";
+  import * as Empty from "#lib/components/ui/empty/index.js";
   import {
     ChevronLeft,
     Copy,
@@ -29,6 +36,9 @@
     LoaderCircle,
     PanelRightClose,
     PanelRightOpen,
+    SearchX,
+    NotebookPen,
+    AudioLines,
   } from "@lucide/svelte";
 
   const id = $derived(page.params.id!);
@@ -44,7 +54,6 @@
   let levels = $state({ me: 0, them: 0 });
   let currentMs = $state(0);
   let player = $state<Player | null>(null);
-  let more = $state(false);
   let stopping = $state(false);
 
   const live = $derived(app.meeting?.id === id);
@@ -55,7 +64,6 @@
   let regenerateFor: string | null = null;
 
   async function retranscribe() {
-    more = false;
     const ok = await ask("This replaces the transcript with a fresh one from the saved recording. Edits to the transcript are lost.", {
       title: "Re-transcribe meeting?",
       kind: "warning",
@@ -237,159 +245,223 @@
   const template = $derived(s.meetings.templates.find((t) => t.id === (rec?.template_id ?? s.meetings.default_template)));
 </script>
 
-<svelte:window onclick={(e) => more && !(e.target as HTMLElement).closest(".more") && (more = false)} />
+{#snippet noAi(text: string)}
+  <div class="flex flex-col items-start gap-3 rounded-xl border border-dashed p-4">
+    <div class="grid size-9 place-items-center rounded-lg bg-ember-soft text-ember-text"><Sparkles class="size-4" /></div>
+    <p class="text-xs leading-relaxed text-muted-foreground">{@html text}</p>
+  </div>
+{/snippet}
 
 {#if !loaded}
   <div></div>
 {:else if !rec}
-  <div class="empty" style="margin-top:80px"><h3>Not found</h3><a href="/meetings">Back to meetings</a></div>
+  <Empty.Root class="mt-20">
+    <Empty.Header>
+      <Empty.Media variant="icon"><SearchX /></Empty.Media>
+      <Empty.Title>Not found</Empty.Title>
+      <Empty.Description>This meeting may have been deleted.</Empty.Description>
+    </Empty.Header>
+    <Empty.Content><Button variant="outline" size="sm" href="/meetings"><ChevronLeft /> Back to meetings</Button></Empty.Content>
+  </Empty.Root>
 {:else}
-  <div class="detail">
-    <header>
-      <a class="back" href="/meetings"><ChevronLeft size={15} /> Meetings</a>
-      <div class="titlerow">
+  <div class="flex h-full min-h-0 flex-col">
+    <header class="shrink-0 border-b px-8 pt-10 pb-4">
+      <a class="relative z-10 -ml-1 inline-flex items-center gap-0.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground" href="/meetings">
+        <ChevronLeft class="size-3.5" /> Meetings
+      </a>
+      <div class="mt-1 flex items-center gap-1.5">
         <input
-          class="title selectable"
+          class="selectable heading field-sizing-content -ml-1.5 max-w-full min-w-32 truncate rounded-lg border border-transparent bg-transparent px-1.5 py-0.5 text-[26px] leading-tight outline-none hover:border-border focus:border-ring focus:bg-background focus:ring-3 focus:ring-ring/20"
           value={rec.title}
           onchange={(e) => patch({ title: e.currentTarget.value.trim() || rec!.title })}
           onkeydown={(e) => e.key === "Enter" && e.currentTarget.blur()}
         />
-        <button class="btn icon sm ghost star" class:on={rec.starred} title="Star" onclick={() => patch({ starred: !rec!.starred })}>
-          <Star size={15} fill={rec.starred ? "currentColor" : "none"} />
-        </button>
-        <span class="spacer"></span>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          class={rec.starred ? "text-amber hover:text-amber" : "text-muted-foreground"}
+          title="Star"
+          onclick={() => patch({ starred: !rec!.starred })}
+        >
+          <Star fill={rec.starred ? "currentColor" : "none"} />
+        </Button>
+        <span class="flex-1"></span>
         {#if !live && rec.status === "ready" && rec.segments.length}
           <ExportMenu {id} title={rec.title} hasNotes={!!(rec.notes || rec.enhanced)} hasSpeakers />
         {/if}
-        <div class="more">
-          <button class="btn sm icon" onclick={() => (more = !more)}><Ellipsis size={15} /></button>
-          {#if more}
-            <div class="menu card">
-              {#if rec.enhanced}
-                <button onclick={() => { more = false; writeText(rec!.enhanced); app.toast("success", "Notes copied"); }}><Copy size={14} /> Copy notes</button>
-              {/if}
-              {#if rec.audio_path}
-                <button onclick={() => { more = false; api.reveal(rec!.audio_path!); }}><Mic size={14} /> Show recording</button>
-              {/if}
-              {#if rec.audio_path && !live}
-                <button disabled={rec.status === "processing"} onclick={retranscribe}><RefreshCw size={14} /> Re-transcribe</button>
-              {/if}
-              <button class="danger" disabled={live} onclick={remove}><Trash2 size={14} /> Delete</button>
-            </div>
-          {/if}
-        </div>
-        <button class="btn sm icon ghost" title="Toggle side panel" onclick={() => (side = !side)}>
-          {#if side}<PanelRightClose size={15} />{:else}<PanelRightOpen size={15} />{/if}
-        </button>
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger>
+            {#snippet child({ props })}
+              <Button variant="outline" size="icon-sm" title="More" {...props}><Ellipsis /></Button>
+            {/snippet}
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Content align="end" class="w-52">
+            {#if rec.enhanced}
+              <DropdownMenu.Item
+                onclick={() => {
+                  writeText(rec!.enhanced);
+                  app.toast("success", "Notes copied");
+                }}><Copy /> Copy notes</DropdownMenu.Item
+              >
+            {/if}
+            {#if rec.audio_path}
+              <DropdownMenu.Item onclick={() => api.reveal(rec!.audio_path!)}><Mic /> Show recording</DropdownMenu.Item>
+            {/if}
+            {#if rec.audio_path && !live}
+              <DropdownMenu.Item disabled={rec.status === "processing"} onclick={retranscribe}><RefreshCw /> Re-transcribe</DropdownMenu.Item>
+            {/if}
+            {#if rec.enhanced || rec.audio_path}<DropdownMenu.Separator />{/if}
+            <DropdownMenu.Item variant="destructive" disabled={live} onclick={remove}><Trash2 /> Delete</DropdownMenu.Item>
+          </DropdownMenu.Content>
+        </DropdownMenu.Root>
+        <Button variant="ghost" size="icon-sm" class="text-muted-foreground" title="Toggle side panel" onclick={() => (side = !side)}>
+          {#if side}<PanelRightClose />{:else}<PanelRightOpen />{/if}
+        </Button>
       </div>
-      <div class="meta faint small">
-        <span>{relDate(rec.created_at)}</span>
-        {#if rec.duration_ms && !live}<span>{duration(rec.duration_ms)}</span>{/if}
-        {#if Object.keys(rec.speakers).length}<span>{Object.values(rec.speakers).join(", ")}</span>{/if}
+      <div class="mt-2 flex flex-wrap items-center gap-1.5">
+        {#if live}
+          <Badge class="bg-ember-soft text-ember-text"><span class="size-1.5 animate-pulse-ring rounded-full bg-ember"></span> Live</Badge>
+        {/if}
+        <Badge variant="secondary" class="font-normal">{relDate(rec.created_at)}</Badge>
+        {#if rec.duration_ms && !live}<Badge variant="secondary" class="font-normal">{duration(rec.duration_ms)}</Badge>{/if}
+        {#if Object.keys(rec.speakers).length}
+          <Badge variant="outline" class="font-normal text-muted-foreground">{Object.values(rec.speakers).join(", ")}</Badge>
+        {/if}
       </div>
     </header>
 
     {#if live && app.meeting}
-      <div class="recbar">
-        <span class="dot" class:live={!app.meeting.paused}></span>
-        <b class="mono">{clock(app.meeting.elapsed_ms)}</b>
-        <span class="faint small">{app.meeting.paused ? "Paused" : "Recording"}</span>
-        <div class="lv">
+      <div class="flex shrink-0 items-center gap-3 border-b bg-ember-soft/40 py-2 pr-6 pl-8">
+        <span class="size-2 rounded-full {app.meeting.paused ? 'bg-muted-foreground/50' : 'animate-pulse-ring bg-ember'}"></span>
+        <b class="font-mono text-[13px] font-semibold tabular-nums">{clock(app.meeting.elapsed_ms)}</b>
+        <span class="text-xs text-muted-foreground">{app.meeting.paused ? "Paused" : "Recording"}</span>
+        <div class="ml-3 flex gap-4">
           <Levels label="You" level={app.meeting.paused ? 0 : levels.me} active={app.meeting.mic} />
           <Levels label={rec.speakers["Them"] || "Them"} level={app.meeting.paused ? 0 : levels.them} active={app.meeting.system} tone="sage" />
         </div>
         {#if app.meeting.system_error}
-          <button class="chip amber warn" title={app.meeting.system_error} onclick={() => api.openPrivacy("system_audio")}>
-            <TriangleAlert size={12} /> Mic only — allow system audio
+          <button
+            class="inline-flex h-6 items-center gap-1.5 rounded-full bg-amber-soft px-2.5 text-xs font-medium text-amber"
+            title={app.meeting.system_error}
+            onclick={() => api.openPrivacy("system_audio")}
+          >
+            <TriangleAlert class="size-3" /> Mic only — allow system audio
           </button>
         {/if}
-        <span class="spacer"></span>
-        <button class="btn sm" onclick={() => api.meetingPause(!app.meeting!.paused).then(() => app.refreshMeeting())}>
-          {#if app.meeting.paused}<Play size={13} /> Resume{:else}<Pause size={13} /> Pause{/if}
-        </button>
-        <button class="btn sm primary" onclick={stop} disabled={stopping}>
-          {#if stopping}<LoaderCircle size={13} class="spin" /> Finishing…{:else}<Square size={11} fill="currentColor" /> Stop{/if}
-        </button>
+        <span class="flex-1"></span>
+        <Button variant="outline" size="sm" class="bg-background" onclick={() => api.meetingPause(!app.meeting!.paused).then(() => app.refreshMeeting())}>
+          {#if app.meeting.paused}<Play /> Resume{:else}<Pause /> Pause{/if}
+        </Button>
+        <Button size="sm" onclick={stop} disabled={stopping}>
+          {#if stopping}<LoaderCircle class="animate-spin" /> Finishing…{:else}<Square class="size-3" fill="currentColor" /> Stop{/if}
+        </Button>
       </div>
     {:else if rec.status === "processing"}
-      <div class="recbar"><LoaderCircle size={14} class="spin" /> <span class="muted">Finishing the transcript…</span></div>
+      <div class="flex shrink-0 items-center gap-2 border-b bg-muted/40 py-2 pr-6 pl-8 text-sm text-muted-foreground">
+        <LoaderCircle class="size-4 animate-spin text-ember-text" /> Finishing the transcript…
+      </div>
     {/if}
 
-    <div class="cols" class:noside={!side}>
-      <div class="left">
+    <div class="grid min-h-0 flex-1 {side ? 'grid-cols-[minmax(0,1fr)_340px]' : 'grid-cols-1'}">
+      <div class="flex min-h-0 min-w-0 flex-col">
         {#if !live && (rec.segments.length || rec.enhanced)}
-          <div class="viewbar">
-            <div class="tabs">
-              {#if hasAi || rec.enhanced}<button class:on={view === "enhanced"} onclick={() => (view = "enhanced")}><Sparkles size={12} /> Notes</button>{/if}
-              <button class:on={view === "notes"} onclick={() => (view = "notes")}>My notes</button>
-              <button class:on={view === "transcript"} onclick={() => (view = "transcript")}>Transcript</button>
-            </div>
+          <div class="flex shrink-0 items-center gap-1.5 px-8 pt-4">
+            <Tabs.Root bind:value={() => view, (v) => (view = v as typeof view)}>
+              <Tabs.List>
+                {#if hasAi || rec.enhanced}<Tabs.Trigger value="enhanced" class="px-2.5"><Sparkles /> Notes</Tabs.Trigger>{/if}
+                <Tabs.Trigger value="notes" class="px-2.5"><NotebookPen /> My notes</Tabs.Trigger>
+                <Tabs.Trigger value="transcript" class="px-2.5"><AudioLines /> Transcript</Tabs.Trigger>
+              </Tabs.List>
+            </Tabs.Root>
             {#if view === "enhanced" && hasAi}
-              <span class="spacer"></span>
-              <select
-                class="select tpl"
+              <span class="flex-1"></span>
+              <Select.Root
+                type="single"
                 value={rec.template_id ?? s.meetings.default_template}
                 disabled={enhancing}
-                onchange={(e) => {
-                  const t = e.currentTarget.value;
+                onValueChange={(t) => {
                   patch({ template_id: t });
                   enhance(t);
                 }}
               >
-                {#each s.meetings.templates as t}<option value={t.id}>{t.name}</option>{/each}
-              </select>
+                <Select.Trigger size="sm" class="w-44"><span class="truncate">{template?.name ?? "Template"}</span></Select.Trigger>
+                <Select.Content align="end">
+                  {#each s.meetings.templates as t}<Select.Item value={t.id} label={t.name} />{/each}
+                </Select.Content>
+              </Select.Root>
               {#if rec.enhanced && !enhancing}
-                <button class="btn sm ghost" title="Regenerate" onclick={() => enhance()}><RefreshCw size={13} /></button>
-                <button class="btn sm ghost" title="Edit" onclick={() => { enhancedDraft = rec!.enhanced; editingEnhanced = true; }}><Pencil size={13} /></button>
+                <Button variant="ghost" size="icon-sm" class="text-muted-foreground" title="Regenerate" onclick={() => enhance()}><RefreshCw /></Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  class="text-muted-foreground"
+                  title="Edit"
+                  onclick={() => {
+                    enhancedDraft = rec!.enhanced;
+                    editingEnhanced = true;
+                  }}><Pencil /></Button
+                >
               {/if}
             {/if}
           </div>
         {/if}
 
-        <div class="scroll">
+        <div class="scroll flex flex-1 flex-col overflow-y-auto px-8 pt-6 pb-10">
           {#if view === "notes" || live || (!rec.segments.length && !rec.enhanced)}
-            <div class="notepad">
+            <div class="flex max-w-3xl flex-1 flex-col gap-4">
               {#if !live && !rec.segments.length && rec.status !== "processing"}
-                <div class="startcard">
-                  <div>
-                    <h3>Ready when you are</h3>
-                    <p class="muted small">
+                <div class="flex items-center gap-5 rounded-2xl border bg-card p-5 shadow-xs">
+                  <div class="grid size-11 shrink-0 place-items-center rounded-xl bg-ember-soft text-ember-text"><Mic class="size-5" /></div>
+                  <div class="flex-1">
+                    <h3 class="heading text-lg">Ready when you are</h3>
+                    <p class="mt-0.5 text-xs leading-relaxed text-muted-foreground">
                       Hush records your mic{s.meetings.capture_system_audio ? " and the call's audio" : ""}. Type the things you'd want to remember — Hush fills in the rest.
                     </p>
                   </div>
-                  <button class="btn primary" onclick={start} disabled={!!app.meeting}><Mic size={14} /> Start recording</button>
+                  <Button onclick={start} disabled={!!app.meeting}><Mic /> Start recording</Button>
                 </div>
               {/if}
               <textarea
-                class="notes selectable"
+                class="notes selectable min-h-80 flex-1 resize-none bg-transparent text-[15.5px] leading-[1.75] outline-none"
                 placeholder={live ? "Write notes… key points, questions, decisions. Rough is fine." : "Agenda, context, or notes…"}
                 bind:value={notes}
                 oninput={onNotes}
               ></textarea>
               {#if !live && rec.segments.length && hasAi && !rec.enhanced && !enhancing}
-                <button class="btn primary enh" onclick={() => enhance()}><Sparkles size={14} /> Enhance notes with {template?.name ?? "template"}</button>
+                <Button class="self-start" onclick={() => enhance()}><Sparkles /> Enhance notes with {template?.name ?? "template"}</Button>
               {/if}
             </div>
           {:else if view === "enhanced"}
-            <div class="enhanced">
+            <div class="max-w-3xl">
               {#if editingEnhanced}
-                <textarea class="textarea" rows="24" bind:value={enhancedDraft}></textarea>
-                <div class="row">
-                  <button class="btn sm primary" onclick={() => { patch({ enhanced: enhancedDraft }); editingEnhanced = false; }}>Save</button>
-                  <button class="btn sm ghost" onclick={() => (editingEnhanced = false)}>Cancel</button>
+                <Textarea class="field-sizing-fixed font-mono text-[13px]" rows={24} bind:value={enhancedDraft} />
+                <div class="mt-3 flex gap-1.5">
+                  <Button
+                    size="sm"
+                    onclick={() => {
+                      patch({ enhanced: enhancedDraft });
+                      editingEnhanced = false;
+                    }}>Save</Button
+                  >
+                  <Button variant="ghost" size="sm" onclick={() => (editingEnhanced = false)}>Cancel</Button>
                 </div>
               {:else if rec.enhanced}
-                <Markdown source={rec.enhanced} class="big" />
+                <Markdown source={rec.enhanced} class="text-[15px]! leading-[1.7]!" />
                 {#if enhancing}<span class="cursor"></span>{/if}
               {:else if enhancing}
-                <div class="state"><LoaderCircle size={18} class="spin" /><p class="muted">Writing notes from your transcript{notes ? " and jottings" : ""}…</p></div>
-              {:else}
-                <div class="state">
-                  <Sparkles size={20} />
-                  <h3>Turn this into notes</h3>
-                  <p class="muted small">Combines your jottings with the transcript using the “{template?.name}” template.</p>
-                  <button class="btn primary" onclick={() => enhance()}>Enhance notes</button>
+                <div class="mx-auto my-16 flex flex-col items-center gap-3 text-center">
+                  <div class="grid size-11 place-items-center rounded-xl bg-ember-soft text-ember-text"><LoaderCircle class="size-5 animate-spin" /></div>
+                  <p class="text-sm text-muted-foreground">Writing notes from your transcript{notes ? " and jottings" : ""}…</p>
                 </div>
+              {:else}
+                <Empty.Root class="my-10">
+                  <Empty.Header>
+                    <Empty.Media variant="icon" class="size-11 rounded-xl bg-ember-soft text-ember-text"><Sparkles class="size-5" /></Empty.Media>
+                    <Empty.Title class="heading text-xl">Turn this into notes</Empty.Title>
+                    <Empty.Description>Combines your jottings with the transcript using the “{template?.name}” template.</Empty.Description>
+                  </Empty.Header>
+                  <Empty.Content><Button onclick={() => enhance()}><Sparkles /> Enhance notes</Button></Empty.Content>
+                </Empty.Root>
               {/if}
             </div>
           {:else}
@@ -406,39 +478,35 @@
         </div>
 
         {#if !live && view === "transcript" && rec.audio_path}
-          <div class="playerwrap">
+          <div class="shrink-0 px-6 pt-1 pb-4">
             <Player bind:this={player} path={rec.audio_path} bind:currentMs durationMs={rec.duration_ms} />
           </div>
         {/if}
       </div>
 
       {#if side}
-        <aside class="right">
+        <aside class="flex min-h-0 flex-col border-l bg-muted/30 p-4">
           {#if live || (!rec.enhanced && view !== "transcript" && rec.segments.length && !hasAi)}
-            <div class="sidehead"><span class="eyebrow">Live transcript</span></div>
-            <div class="scroll livet">
+            <div class="mb-3 flex items-center gap-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+              {#if live}<span class="size-1.5 animate-pulse-ring rounded-full bg-ember"></span>{/if} Live transcript
+            </div>
+            <div class="scroll livet flex-1 overflow-y-auto">
               {#if rec.segments.length}
                 <Transcript segments={rec.segments} speakers={rec.speakers} live showTimes={false} editable={false} />
               {:else}
-                <p class="faint small">{live ? "Listening… lines appear a few seconds after someone stops talking." : "No transcript yet."}</p>
+                <p class="text-xs leading-relaxed text-muted-foreground">
+                  {live ? "Listening… lines appear a few seconds after someone stops talking." : "No transcript yet."}
+                </p>
               {/if}
             </div>
           {:else if hasAi && rec.segments.length}
-            <Chat
-              {id}
-              bind:messages={rec.chat}
-              recipes={s.meetings.recipes}
-              llmName={app.llmName(s.meetings.llm_profile)}
-            />
+            <Chat {id} bind:messages={rec.chat} recipes={s.meetings.recipes} llmName={app.llmName(s.meetings.llm_profile)} />
           {:else if !hasAi}
-            <div class="noai">
-              <Sparkles size={18} />
-              <p class="muted small">Connect an AI in <a href="/settings?tab=ai">Settings → AI</a> to enhance notes, run recipes like “Write follow-up email”, and chat with your meeting.</p>
-            </div>
+            {@render noAi(
+              'Connect an AI in <a href="/settings?tab=ai">Settings → AI</a> to enhance notes, run recipes like “Write follow-up email”, and chat with your meeting.',
+            )}
           {:else}
-            <div class="noai">
-              <p class="faint small">Record the meeting to ask questions about it here.</p>
-            </div>
+            <p class="p-1 text-xs text-muted-foreground">Record the meeting to ask questions about it here.</p>
           {/if}
         </aside>
       {/if}
@@ -447,214 +515,12 @@
 {/if}
 
 <style>
-  .detail {
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-  }
-  header {
-    padding: 38px 24px 12px 40px;
-    border-bottom: 1px solid var(--line);
-    flex: none;
-  }
-  .back {
-    position: relative;
-    z-index: 6;
-    display: inline-flex;
-    align-items: center;
-    gap: 2px;
-    margin-left: -4px;
-    color: var(--text-3);
-    font-size: 12.5px;
-  }
-  .back:hover {
-    color: var(--text);
-  }
-  .titlerow {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: 4px;
-  }
-  .title {
-    flex: 0 1 auto;
-    field-sizing: content;
-    min-width: 120px;
-    max-width: 100%;
-    padding: 2px 6px;
-    margin-left: -6px;
-    border: 1px solid transparent;
-    border-radius: var(--r-sm);
-    background: none;
-    color: var(--text);
-    font-family: var(--serif);
-    font-size: 26px;
-    font-weight: 500;
-    outline: none;
-    text-overflow: ellipsis;
-  }
-  .title:hover {
-    border-color: var(--line);
-  }
-  .title:focus {
-    border-color: var(--line-2);
-    background: var(--surface);
-  }
-  .star.on {
-    color: var(--amber);
-  }
-  .meta {
-    display: flex;
-    gap: 14px;
-    margin-top: 2px;
-  }
-  .more {
-    position: relative;
-  }
-  .menu {
-    position: absolute;
-    right: 0;
-    top: 32px;
-    z-index: 40;
-    width: 200px;
-    padding: 5px;
-    border-radius: var(--r);
-    box-shadow: var(--shadow-pop);
-    display: flex;
-    flex-direction: column;
-  }
-  .menu button {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    padding: 7px 8px;
-    border: 0;
-    border-radius: 6px;
-    background: none;
-    color: inherit;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-  }
-  .menu button:hover {
-    background: var(--surface-2);
-  }
-  .menu button:disabled {
-    opacity: 0.4;
-  }
-  .menu .danger {
-    color: var(--ember-text);
-  }
-  .recbar {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 8px 24px 8px 40px;
-    border-bottom: 1px solid var(--line);
-    background: color-mix(in srgb, var(--ember-soft) 50%, var(--bg));
-    flex: none;
-  }
-  .recbar b {
-    font-size: 13px;
-  }
-  .lv {
-    display: flex;
-    gap: 14px;
-    margin-left: 10px;
-  }
-  .warn {
-    cursor: pointer;
-    font: inherit;
-    font-size: 11.5px;
-  }
-  .cols {
-    flex: 1;
-    min-height: 0;
-    display: grid;
-    grid-template-columns: 1fr 340px;
-  }
-  .cols.noside {
-    grid-template-columns: 1fr;
-  }
-  .left {
-    min-width: 0;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-  }
-  .viewbar {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 12px 24px 0 40px;
-  }
-  .viewbar .tabs button {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-  }
-  .tpl {
-    width: 170px;
-    height: 28px;
-    font-size: 12.5px;
-  }
-  .scroll {
-    flex: 1;
-    overflow-y: auto;
-    padding: 22px 40px 40px;
-    display: flex;
-    flex-direction: column;
-  }
-  .notepad {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    max-width: 760px;
-  }
-  .startcard {
-    display: flex;
-    align-items: center;
-    gap: 20px;
-    padding: 16px 18px;
-    border-radius: var(--r-lg);
-    background: var(--surface);
-    border: 1px solid var(--line);
-  }
-  .startcard div {
-    flex: 1;
-  }
-  .startcard h3 {
-    margin-bottom: 2px;
-  }
-  .notes {
-    flex: 1;
-    min-height: 320px;
-    border: 0;
-    outline: 0;
-    resize: none;
-    background: none;
-    color: var(--text);
-    font: inherit;
-    font-size: 15.5px;
-    line-height: 1.75;
-  }
   .notes::placeholder {
-    color: var(--text-3);
-    font-family: var(--serif);
+    color: var(--muted-foreground);
+    opacity: 0.7;
+    font-family: var(--font-serif);
     font-style: italic;
     font-size: 17px;
-  }
-  .enh {
-    align-self: flex-start;
-  }
-  .enhanced {
-    max-width: 760px;
-  }
-  .enhanced :global(.prose.big) {
-    font-size: 15px;
-    line-height: 1.7;
   }
   .cursor {
     display: inline-block;
@@ -668,46 +534,8 @@
       opacity: 0;
     }
   }
-  .state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 10px;
-    margin: 60px auto;
-    text-align: center;
-  }
-  .state :global(svg) {
-    color: var(--ember-text);
-  }
-  .playerwrap {
-    padding: 10px 24px 16px;
-    flex: none;
-  }
-  .right {
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    padding: 16px 20px;
-    border-left: 1px solid var(--line);
-    background: var(--bg-sidebar);
-  }
-  .sidehead {
-    margin-bottom: 8px;
-  }
-  .livet {
-    padding: 0;
-  }
   .livet :global(.text) {
     font-size: 13px;
     line-height: 1.55;
-  }
-  .noai {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding: 6px 2px;
-  }
-  .noai :global(svg) {
-    color: var(--ember-text);
   }
 </style>

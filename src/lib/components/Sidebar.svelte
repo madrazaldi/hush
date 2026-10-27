@@ -4,6 +4,8 @@
   import { app } from "#lib/state.svelte.js";
   import { api, errorText } from "#lib/api.js";
   import { clock } from "#lib/format.js";
+  import * as Sidebar from "#lib/components/ui/sidebar/index.js";
+  import { Button } from "#lib/components/ui/button/index.js";
   import Keys from "./Keys.svelte";
   import { AudioLines, FileAudio, House, Mic, Settings, Square, Users } from "@lucide/svelte";
 
@@ -29,171 +31,79 @@
   }
 </script>
 
-<aside>
-  <div class="top" data-drag-region></div>
+{#snippet navLink(it: { href: string; label: string; icon: typeof House })}
+  <Sidebar.MenuItem>
+    <Sidebar.MenuButton isActive={active(it.href)} class="h-8 gap-2.5 px-2.5 text-[13px] text-sidebar-foreground/75 data-active:text-sidebar-accent-foreground [&_svg]:text-sidebar-foreground/55 data-active:[&_svg]:text-ember-text">
+      {#snippet child({ props })}
+        <a href={it.href} {...props}>
+          <it.icon strokeWidth={1.8} />
+          <span>{it.label}</span>
+        </a>
+      {/snippet}
+    </Sidebar.MenuButton>
+  </Sidebar.MenuItem>
+{/snippet}
 
-  <div class="brand" data-drag-region>
-    <svg viewBox="0 0 32 32" width="22" height="22" aria-hidden="true">
-      <rect x="4" y="13" width="3" height="6" rx="1.5" fill="currentColor" opacity=".9" />
-      <rect x="9.5" y="9" width="3" height="14" rx="1.5" fill="currentColor" opacity=".9" />
-      <rect x="15" y="5" width="3" height="22" rx="1.5" fill="url(#eg)" />
-      <rect x="20.5" y="8" width="3" height="16" rx="1.5" fill="currentColor" opacity=".9" />
-      <rect x="26" y="12" width="3" height="8" rx="1.5" fill="currentColor" opacity=".9" />
-      <defs>
-        <linearGradient id="eg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FF8A5B" /><stop offset="1" stop-color="#E5533D" /></linearGradient>
-      </defs>
-    </svg>
-    <span>Hush</span>
-  </div>
-
-  {#if app.meeting}
-    <div class="live-pill">
-      <button class="live-main" onclick={() => goto(`/meetings/${app.meeting!.id}`)}>
-        <span class="dot live"></span>
-        <span class="t">{app.meeting.paused ? "Paused" : "Recording"}</span>
-        <span class="mono">{clock(app.meeting.elapsed_ms)}</span>
-      </button>
-      <button class="btn icon sm ghost" title="Stop recording" onclick={stopMeeting}><Square size={12} fill="currentColor" /></button>
+<Sidebar.Root collapsible="none" class="bg-transparent">
+  <Sidebar.Header class="gap-0 px-3 pt-0 pb-2">
+    <div class="h-11 shrink-0" data-drag-region></div>
+    <div class="flex items-center gap-2.5 px-1.5 pb-3" data-drag-region>
+      <div class="grid size-7 place-items-center rounded-lg bg-foreground text-background shadow-sm">
+        <svg viewBox="0 0 32 32" class="size-[18px]" aria-hidden="true">
+          <rect x="4" y="13" width="3" height="6" rx="1.5" fill="currentColor" opacity=".9" />
+          <rect x="9.5" y="9" width="3" height="14" rx="1.5" fill="currentColor" opacity=".9" />
+          <rect x="15" y="5" width="3" height="22" rx="1.5" fill="url(#eg)" />
+          <rect x="20.5" y="8" width="3" height="16" rx="1.5" fill="currentColor" opacity=".9" />
+          <rect x="26" y="12" width="3" height="8" rx="1.5" fill="currentColor" opacity=".9" />
+          <defs>
+            <linearGradient id="eg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FF8A5B" /><stop offset="1" stop-color="#E5533D" /></linearGradient>
+          </defs>
+        </svg>
+      </div>
+      <span class="heading text-lg">Hush</span>
     </div>
-  {/if}
 
-  <nav>
-    {#each items as it}
-      <a href={it.href} class:on={active(it.href)}>
-        <it.icon size={16} strokeWidth={1.8} />
-        <span>{it.label}</span>
-      </a>
-    {/each}
-  </nav>
+    {#if app.meeting}
+      <div class="flex items-center gap-1 rounded-lg border border-ember/20 bg-ember-soft p-1 pl-0">
+        <button
+          class="flex flex-1 items-center gap-2 px-2.5 py-1 text-[13px] font-semibold text-ember-text"
+          onclick={() => goto(`/meetings/${app.meeting!.id}`)}
+        >
+          <span class="size-1.5 rounded-full bg-ember {app.meeting.paused ? '' : 'animate-pulse-ring'}"></span>
+          <span class="flex-1 text-left">{app.meeting.paused ? "Paused" : "Recording"}</span>
+          <span class="font-mono text-xs tabular-nums">{clock(app.meeting.elapsed_ms)}</span>
+        </button>
+        <Button variant="ghost" size="icon-xs" class="text-ember-text hover:bg-ember/15 hover:text-ember-text" title="Stop recording" onclick={stopMeeting}>
+          <Square class="size-2.5" fill="currentColor" />
+        </Button>
+      </div>
+    {/if}
+  </Sidebar.Header>
 
-  <div class="spacer"></div>
+  <Sidebar.Content>
+    <Sidebar.Group class="pt-0">
+      <Sidebar.Menu class="gap-0.5">
+        {#each items as it}{@render navLink(it)}{/each}
+      </Sidebar.Menu>
+    </Sidebar.Group>
+  </Sidebar.Content>
 
-  {#if app.settings}
-    <button class="hint" onclick={() => api.dictationToggle()} title="Start dictation">
-      <AudioLines size={14} />
-      <span>
-        {app.settings.dictation.activation === "toggle" ? "Press" : "Hold"}
-        <Keys combo={app.settings.dictation.hotkey} /> to dictate
-      </span>
-    </button>
-  {/if}
-
-  <nav class="bottom">
-    <a href="/settings" class:on={active("/settings")}>
-      <Settings size={16} strokeWidth={1.8} />
-      <span>Settings</span>
-    </a>
-  </nav>
-</aside>
-
-<style>
-  aside {
-    width: var(--sidebar);
-    flex: none;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    padding: 0 12px 14px;
-    background: var(--bg-sidebar);
-    border-right: 1px solid var(--line);
-  }
-  .top {
-    height: 44px;
-    flex: none;
-  }
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    padding: 0 8px 18px;
-    font-family: var(--serif);
-    font-size: 19px;
-    font-weight: 500;
-    letter-spacing: -0.01em;
-  }
-  .brand svg {
-    color: var(--text);
-  }
-  nav {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-  }
-  nav a {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    height: 32px;
-    padding: 0 10px;
-    border-radius: var(--r-sm);
-    color: var(--text-2);
-    font-weight: 500;
-    transition:
-      background 0.12s,
-      color 0.12s;
-  }
-  nav a:hover {
-    background: var(--surface-2);
-    color: var(--text);
-  }
-  nav a.on {
-    background: var(--surface-2);
-    color: var(--text);
-    box-shadow: inset 2px 0 0 var(--ember);
-  }
-  nav a.on :global(svg) {
-    color: var(--ember-text);
-  }
-  .live-pill {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    margin: 0 0 14px;
-    padding: 3px 3px 3px 0;
-    border-radius: var(--r);
-    background: var(--ember-soft);
-  }
-  .live-main {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 4px 10px;
-    border: 0;
-    background: none;
-    color: var(--ember-text);
-    font: inherit;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .live-main .t {
-    flex: 1;
-    text-align: left;
-  }
-  .live-pill .btn {
-    color: var(--ember-text);
-  }
-  .hint {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin: 0 0 8px;
-    padding: 9px 10px;
-    border-radius: var(--r-sm);
-    border: 1px dashed var(--line-2);
-    background: none;
-    color: var(--text-3);
-    font: inherit;
-    font-size: 12px;
-    text-align: left;
-    cursor: pointer;
-  }
-  .hint:hover {
-    color: var(--text-2);
-    border-color: var(--text-3);
-  }
-  .hint :global(kbd) {
-    height: 18px;
-    font-size: 10.5px;
-  }
-</style>
+  <Sidebar.Footer class="gap-1 px-3 pb-3">
+    {#if app.settings}
+      <button
+        class="mb-1.5 flex items-center gap-2.5 rounded-lg border border-dashed border-sidebar-foreground/15 px-2.5 py-2 text-left text-xs text-sidebar-foreground/55 transition-colors hover:border-sidebar-foreground/30 hover:text-sidebar-foreground/80"
+        onclick={() => api.dictationToggle()}
+        title="Start dictation"
+      >
+        <AudioLines class="size-3.5 shrink-0" />
+        <span class="leading-6">
+          {app.settings.dictation.activation === "toggle" ? "Press" : "Hold"}
+          <Keys combo={app.settings.dictation.hotkey} class="[&_kbd]:h-[18px] [&_kbd]:text-[10.5px]" /> to dictate
+        </span>
+      </button>
+    {/if}
+    <Sidebar.Menu>
+      {@render navLink({ href: "/settings", label: "Settings", icon: Settings })}
+    </Sidebar.Menu>
+  </Sidebar.Footer>
+</Sidebar.Root>

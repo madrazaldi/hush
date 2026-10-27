@@ -88,14 +88,14 @@
       0 8px 24px -8px rgba(0, 0, 0, 0.6),
       inset 0 1px 0 rgba(255, 255, 255, 0.05);
     color: #f3ede4;
-    font-family: var(--sans);
+    font-family: var(--font-sans);
     font-size: 12.5px;
     font-weight: 500;
     backdrop-filter: blur(20px) saturate(1.4);
     transition:
-      min-width 0.25s var(--ease),
+      min-width 0.25s cubic-bezier(0.2, 0.7, 0.2, 1),
       opacity 0.2s;
-    animation: pop 0.22s var(--ease);
+    animation: pop 0.22s cubic-bezier(0.2, 0.7, 0.2, 1);
   }
   .pill.idle {
     opacity: 0;
@@ -141,7 +141,7 @@
     min-width: 30px;
     justify-content: flex-end;
     color: rgba(243, 237, 228, 0.6);
-    font-family: var(--mono);
+    font-family: var(--font-mono);
     font-size: 11px;
   }
   .label {

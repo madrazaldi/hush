@@ -1,6 +1,7 @@
 <script lang="ts">
   import { assetUrl, isVideo } from "#lib/media.js";
   import { clock } from "#lib/format.js";
+  import { Button } from "#lib/components/ui/button/index.js";
   import { Pause, Play, RotateCcw, RotateCw } from "@lucide/svelte";
 
   let {
@@ -69,13 +70,14 @@
 <svelte:window onkeydown={key} />
 
 {#if src && !failed}
-  <div class="player" class:video>
+  <div class="overflow-hidden rounded-xl border bg-card shadow-sm">
     {#if video}
       <!-- svelte-ignore a11y_media_has_caption -->
       <video
         bind:this={el}
         {src}
         preload="metadata"
+        class="block max-h-[300px] w-full cursor-pointer bg-black"
         onplay={() => (playing = true)}
         onpause={() => (playing = false)}
         ontimeupdate={() => !scrubbing && el && (currentMs = el.currentTime * 1000)}
@@ -95,15 +97,20 @@
         {onerror}
       ></audio>
     {/if}
-    <div class="bar">
-      <button class="btn icon sm ghost" title="Back 10s" onclick={() => skip(-10)}><RotateCcw size={14} /></button>
-      <button class="play" title="Play/pause (space)" onclick={toggle}>
-        {#if playing}<Pause size={15} fill="currentColor" />{:else}<Play size={15} fill="currentColor" />{/if}
+    <div class="flex items-center gap-1.5 px-2.5 py-2">
+      <Button variant="ghost" size="icon-sm" class="text-muted-foreground" title="Back 10s" onclick={() => skip(-10)}><RotateCcw /></Button>
+      <button
+        class="grid size-8 shrink-0 place-items-center rounded-full bg-foreground text-background shadow-sm transition-transform active:scale-95"
+        title="Play/pause (space)"
+        onclick={toggle}
+      >
+        {#if playing}<Pause class="size-3.5" fill="currentColor" />{:else}<Play class="ml-px size-3.5" fill="currentColor" />{/if}
       </button>
-      <button class="btn icon sm ghost" title="Forward 10s" onclick={() => skip(10)}><RotateCw size={14} /></button>
-      <span class="t mono">{clock(currentMs)}</span>
+      <Button variant="ghost" size="icon-sm" class="text-muted-foreground" title="Forward 10s" onclick={() => skip(10)}><RotateCw /></Button>
+      <span class="min-w-11 text-center font-mono text-[11.5px] tabular-nums">{clock(currentMs)}</span>
       <input
         type="range"
+        class="scrub"
         min="0"
         max={Math.max(1, totalMs)}
         value={currentMs}
@@ -112,76 +119,31 @@
         onpointerdown={() => (scrubbing = true)}
         onpointerup={() => (scrubbing = false)}
       />
-      <span class="t mono faint">{clock(totalMs)}</span>
-      <button class="btn sm ghost rate mono" onclick={setRate}>{rate}×</button>
+      <span class="min-w-11 text-center font-mono text-[11.5px] text-muted-foreground tabular-nums">{clock(totalMs)}</span>
+      <Button variant="ghost" size="sm" class="min-w-11 font-mono text-xs text-muted-foreground" title="Playback speed" onclick={setRate}>{rate}×</Button>
     </div>
   </div>
 {:else if path}
-  <div class="player unavailable faint small">Playback isn't available for this file.</div>
+  <div class="rounded-xl border border-dashed px-3.5 py-2.5 text-xs text-muted-foreground">Playback isn't available for this file.</div>
 {/if}
 
 <style>
-  .player {
-    border-radius: var(--r);
-    background: var(--surface);
-    border: 1px solid var(--line);
-    box-shadow: var(--shadow);
-    overflow: hidden;
-  }
-  video {
-    display: block;
-    width: 100%;
-    max-height: 300px;
-    background: #000;
-    cursor: pointer;
-  }
-  .bar {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 10px;
-  }
-  .play {
-    display: grid;
-    place-items: center;
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    border: 0;
-    background: var(--text);
-    color: var(--bg);
-    cursor: pointer;
-    flex: none;
-  }
-  .play :global(svg) {
-    margin-left: 1px;
-  }
-  .t {
-    min-width: 44px;
-    text-align: center;
-    font-size: 11.5px;
-  }
-  input[type="range"] {
+  .scrub {
     flex: 1;
     appearance: none;
     height: 4px;
     border-radius: 4px;
-    background: linear-gradient(to right, var(--ember) var(--p), var(--surface-3) var(--p));
+    background: linear-gradient(to right, var(--ember) var(--p), var(--muted) var(--p));
     outline: none;
     cursor: pointer;
   }
-  input[type="range"]::-webkit-slider-thumb {
+  .scrub::-webkit-slider-thumb {
     appearance: none;
     width: 12px;
     height: 12px;
     border-radius: 50%;
-    background: var(--text);
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
-  }
-  .rate {
-    min-width: 44px;
-  }
-  .unavailable {
-    padding: 10px 14px;
+    background: var(--background);
+    border: 2px solid var(--ember);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
   }
 </style>
