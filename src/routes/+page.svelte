@@ -8,7 +8,13 @@
   import type { Dictation, RecordingSummary, Stats } from "#lib/types.js";
   import Keys from "#lib/components/Keys.svelte";
   import Markdown from "#lib/components/Markdown.svelte";
-  import { ArrowUp, FileAudio, Flame, Mic, Square, Users, Sparkles, X } from "@lucide/svelte";
+  import Page from "#lib/components/Page.svelte";
+  import { Button } from "#lib/components/ui/button/index.js";
+  import { Badge } from "#lib/components/ui/badge/index.js";
+  import * as Card from "#lib/components/ui/card/index.js";
+  import * as InputGroup from "#lib/components/ui/input-group/index.js";
+  import { Spinner } from "#lib/components/ui/spinner/index.js";
+  import { ArrowRight, ArrowUp, ChevronRight, FileAudio, Flame, Mic, Square, Users, Sparkles, X } from "@lucide/svelte";
 
   let stats = $state<Stats | null>(null);
   let dictations = $state<Dictation[]>([]);
@@ -34,6 +40,9 @@
   });
   // Typing at ~40 wpm vs. the time actually spent speaking.
   const saved = $derived(stats ? Math.max(0, (stats.dictation_words / 40) * 60_000 - stats.dictation_ms) : 0);
+
+  const actionClass =
+    "group flex flex-col items-start gap-1 rounded-xl border bg-card p-4 text-left shadow-xs transition-all duration-200 hover:-translate-y-0.5 hover:border-ember/30 hover:shadow-md";
 
   async function newMeeting() {
     try {
@@ -74,287 +83,146 @@
   }
 </script>
 
-<div class="page">
-  <div class="page-narrow">
-    <header class="hello">
-      <p class="eyebrow">{new Date().toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" })}</p>
-      <h1>{greeting}{name ? `, ${name}` : ""}.</h1>
-    </header>
+{#snippet action(icon: typeof Mic, title: string, live = false)}
+  <div
+    class="mb-3 grid size-9 place-items-center rounded-lg transition-colors {live
+      ? 'bg-ember text-primary-foreground shadow-[0_6px_16px_-6px_var(--ember)]'
+      : 'bg-ember-soft text-ember-text group-hover:bg-ember group-hover:text-primary-foreground'}"
+  >
+    {#if icon === Square}<Square class="size-3.5" fill="currentColor" />{:else}{@const Icon = icon}<Icon class="size-[18px]" />{/if}
+  </div>
+  <div class="flex items-center gap-1 font-semibold">
+    {title}
+    <ArrowRight class="size-3.5 -translate-x-1 text-muted-foreground opacity-0 transition-all group-hover:translate-x-0 group-hover:opacity-100" />
+  </div>
+{/snippet}
 
-    <div class="actions">
-      <button class="action" onclick={() => api.dictationToggle()}>
-        <div class="ic"><Mic size={18} /></div>
-        <b>Dictate</b>
-        <span>{app.settings?.dictation.activation === "toggle" ? "Press" : "Hold"} <Keys combo={app.settings?.dictation.hotkey ?? "Fn"} /> anywhere</span>
-      </button>
-      {#if app.meeting}
-        <button class="action live" onclick={() => goto(`/meetings/${app.meeting!.id}`)}>
-          <div class="ic"><Square size={15} fill="currentColor" /></div>
-          <b>Meeting in progress</b>
-          <span>Open live notes</span>
-        </button>
-      {:else}
-        <button class="action" onclick={newMeeting}>
-          <div class="ic"><Users size={18} /></div>
-          <b>Record a meeting</b>
-          <span>Mic and system audio, with notes</span>
-        </button>
-      {/if}
-      <button class="action" onclick={pickFiles}>
-        <div class="ic"><FileAudio size={18} /></div>
-        <b>Transcribe a file</b>
-        <span>Or drop audio, video or a link</span>
-      </button>
-    </div>
+{#snippet stat(num: string, label: string, flame = false)}
+  <div class="flex flex-col gap-1 px-5 py-4">
+    <span class="heading flex items-center gap-1.5 text-[28px] leading-none tabular-nums">
+      {#if flame}<Flame class="size-5 {stats?.streak_days ? 'fill-ember/20 text-ember' : 'text-muted-foreground'}" />{/if}{num}
+    </span>
+    <span class="text-xs text-muted-foreground">{label}</span>
+  </div>
+{/snippet}
 
-    {#if app.settings?.llm_profiles.length}
-      <form class="ask card" onsubmit={ask}>
-        <Sparkles size={16} />
-        <input class="selectable" placeholder="Ask across all your meetings and files…" bind:value={question} />
-        {#if asking}
-          <button type="button" class="btn icon sm ghost" aria-label="Stop" onclick={() => api.cancelLlm(askId)}><X size={14} /></button>
+<Page>
+  <header class="mb-8">
+    <p class="mb-2 text-xs font-medium tracking-wider text-muted-foreground uppercase">
+      {new Date().toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" })}
+    </p>
+    <h1 class="heading text-[40px] leading-[1.1]">{greeting}{name ? `, ${name}` : ""}<span class="text-ember">.</span></h1>
+  </header>
+
+
+  <div class="grid grid-cols-3 gap-3">
+    <button class={actionClass} onclick={() => api.dictationToggle()}>
+      {@render action(Mic, "Dictate")}
+      <span class="text-xs text-muted-foreground">
+        {app.settings?.dictation.activation === "toggle" ? "Press" : "Hold"}
+        <Keys combo={app.settings?.dictation.hotkey ?? "Fn"} class="[&_kbd]:h-[18px] [&_kbd]:text-[10px]" /> anywhere
+      </span>
+    </button>
+    {#if app.meeting}
+      <button class="{actionClass} border-ember/40 bg-ember-soft hover:border-ember/60" onclick={() => goto(`/meetings/${app.meeting!.id}`)}>
+        {@render action(Square, "Meeting in progress", true)}
+        <span class="flex items-center gap-1.5 text-xs text-ember-text">
+          <span class="size-1.5 rounded-full bg-ember animate-pulse-ring"></span> Open live notes
+        </span>
+      </button>
+    {:else}
+      <button class={actionClass} onclick={newMeeting}>
+        {@render action(Users, "Record a meeting")}
+        <span class="text-xs text-muted-foreground">Mic and system audio, with notes</span>
+      </button>
+    {/if}
+    <button class={actionClass} onclick={pickFiles}>
+      {@render action(FileAudio, "Transcribe a file")}
+      <span class="text-xs text-muted-foreground">Or drop audio, video or a link</span>
+    </button>
+  </div>
+
+  {#if app.settings?.llm_profiles.length}
+    <form class="mt-4" onsubmit={ask}>
+      <InputGroup.Root class="h-11 rounded-xl bg-card shadow-xs has-disabled:bg-card has-disabled:opacity-100 dark:bg-card dark:has-disabled:bg-card">
+        <InputGroup.Addon class="pl-3.5 text-ember-text"><Sparkles /></InputGroup.Addon>
+        <InputGroup.Input class="selectable text-sm" placeholder="Ask across all your meetings and files…" bind:value={question} />
+        <InputGroup.Addon align="inline-end" class="pr-2">
+          {#if asking}
+            <InputGroup.Button type="button" size="icon-sm" variant="ghost" class="size-7" aria-label="Stop" onclick={() => api.cancelLlm(askId)}><X /></InputGroup.Button>
+          {:else}
+            <InputGroup.Button type="submit" size="icon-sm" variant="default" class="size-7 rounded-lg" aria-label="Ask" disabled={!question.trim()}><ArrowUp /></InputGroup.Button>
+          {/if}
+        </InputGroup.Addon>
+      </InputGroup.Root>
+    </form>
+    {#if answer || asking}
+      <Card.Root class="mt-2 max-h-[360px] overflow-auto px-5 py-4">
+        {#if answer}
+          <Markdown source={answer} />
         {:else}
-          <button class="btn icon sm primary" aria-label="Ask" disabled={!question.trim()}><ArrowUp size={14} /></button>
+          <p class="flex items-center gap-2 text-sm text-muted-foreground"><Spinner class="size-3.5" /> Reading your transcripts…</p>
         {/if}
-      </form>
-      {#if answer || asking}
-        <div class="answer card">
-          {#if answer}<Markdown source={answer} />{:else}<p class="faint">Reading your transcripts…</p>{/if}
-        </div>
-      {/if}
+      </Card.Root>
     {/if}
+  {/if}
 
-    {#if stats}
-      <div class="stats">
-        <div class="stat">
-          <span class="num">{stats.dictation_words.toLocaleString()}</span>
-          <span class="lbl">words dictated</span>
-        </div>
-        <div class="stat">
-          <span class="num">{saved >= 60_000 ? duration(saved) : "—"}</span>
-          <span class="lbl">saved vs. typing</span>
-        </div>
-        <div class="stat">
-          <span class="num">{stats.meeting_count + stats.file_count}</span>
-          <span class="lbl">recordings · {duration(stats.transcribed_ms)}</span>
-        </div>
-        <div class="stat">
-          <span class="num"><Flame size={20} class={stats.streak_days ? "flame" : ""} />{stats.streak_days}</span>
-          <span class="lbl">day streak</span>
-        </div>
-      </div>
-    {/if}
+  {#if stats}
+    <div class="mt-8 grid grid-cols-4 divide-x rounded-xl border bg-card shadow-xs">
+      {@render stat(stats.dictation_words.toLocaleString(), "words dictated")}
+      {@render stat(saved >= 60_000 ? duration(saved) : "—", "saved vs. typing")}
+      {@render stat(String(stats.meeting_count + stats.file_count), `recordings · ${duration(stats.transcribed_ms)}`)}
+      {@render stat(String(stats.streak_days), "day streak", true)}
+    </div>
+  {/if}
 
-    <div class="cols">
-      <section>
-        <div class="row head"><h3>Recent dictation</h3><a href="/dictation" class="small">See all</a></div>
+
+  <div class="mt-8 grid grid-cols-2 gap-4">
+    <Card.Root class="gap-0 py-0">
+      <Card.Header class="flex items-center justify-between border-b py-3!">
+        <Card.Title class="text-[13px] font-semibold">Recent dictation</Card.Title>
+        <Button variant="ghost" size="xs" href="/dictation" class="-mr-1.5 text-muted-foreground">See all <ChevronRight /></Button>
+      </Card.Header>
+      <div class="divide-y">
         {#each dictations as d}
-          <div class="dict">
-            <p class="selectable">{d.text || d.raw_text}</p>
-            <span class="faint small">{relDate(d.created_at)}{d.app ? ` · ${d.app}` : ""}</span>
+          <div class="px-4 py-3">
+            <p class="selectable line-clamp-2 text-[13.5px] leading-relaxed">{d.text || d.raw_text}</p>
+            <span class="mt-1 block text-xs text-muted-foreground">{relDate(d.created_at)}{d.app ? ` · ${d.app}` : ""}</span>
           </div>
         {:else}
-          <p class="faint small pad">Nothing yet. Your dictations will show up here.</p>
+          <p class="px-4 py-8 text-center text-xs text-muted-foreground">Nothing yet. Your dictations will show up here.</p>
         {/each}
-      </section>
-      <section>
-        <div class="row head"><h3>Recent recordings</h3></div>
+      </div>
+    </Card.Root>
+
+    <Card.Root class="gap-0 py-0">
+      <Card.Header class="flex items-center justify-between border-b py-3!">
+        <Card.Title class="text-[13px] font-semibold">Recent recordings</Card.Title>
+        <Button variant="ghost" size="xs" href="/files" class="-mr-1.5 text-muted-foreground">Files <ChevronRight /></Button>
+      </Card.Header>
+      <div class="p-1.5">
         {#each recent as r}
-          <a class="rec" href={r.kind === "meeting" ? `/meetings/${r.id}` : `/files/${r.id}`}>
-            {#if r.kind === "meeting"}<Users size={15} />{:else}<FileAudio size={15} />{/if}
-            <div>
-              <b>{r.title}</b>
-              <span class="faint small">{relDate(r.created_at)}{r.duration_ms ? ` · ${duration(r.duration_ms)}` : ""}</span>
+          <a
+            class="flex items-center gap-3 rounded-lg px-2.5 py-2 transition-colors hover:bg-muted"
+            href={r.kind === "meeting" ? `/meetings/${r.id}` : `/files/${r.id}`}
+          >
+            <div class="grid size-8 shrink-0 place-items-center rounded-md border bg-background text-muted-foreground">
+              {#if r.kind === "meeting"}<Users class="size-4" />{:else}<FileAudio class="size-4" />{/if}
             </div>
-            {#if r.status === "recording"}<span class="dot live"></span>{:else if r.status !== "ready"}<span class="chip">{r.status}</span>{/if}
+            <div class="flex min-w-0 flex-1 flex-col">
+              <span class="truncate text-[13.5px] font-medium">{r.title}</span>
+              <span class="text-xs text-muted-foreground">{relDate(r.created_at)}{r.duration_ms ? ` · ${duration(r.duration_ms)}` : ""}</span>
+            </div>
+            {#if r.status === "recording"}
+              <span class="size-2 rounded-full bg-ember animate-pulse-ring"></span>
+            {:else if r.status !== "ready"}
+              <Badge variant="secondary" class="capitalize">{r.status}</Badge>
+            {/if}
           </a>
         {:else}
-          <p class="faint small pad">Meetings and files you transcribe appear here.</p>
+          <p class="px-4 py-8 text-center text-xs text-muted-foreground">Meetings and files you transcribe appear here.</p>
         {/each}
-      </section>
-    </div>
+      </div>
+    </Card.Root>
   </div>
-</div>
-
-<style>
-  .hello {
-    margin: 10px 0 26px;
-  }
-  .hello h1 {
-    font-size: 36px;
-    margin-top: 6px;
-  }
-  .actions {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 12px;
-  }
-  .action {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 4px;
-    padding: 16px;
-    border-radius: var(--r-lg);
-    border: 1px solid var(--line);
-    background: var(--surface);
-    color: inherit;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-    box-shadow: var(--shadow);
-    transition:
-      transform 0.15s var(--ease),
-      border-color 0.15s;
-  }
-  .action:hover {
-    transform: translateY(-1px);
-    border-color: var(--line-2);
-  }
-  .action .ic {
-    display: grid;
-    place-items: center;
-    width: 34px;
-    height: 34px;
-    margin-bottom: 8px;
-    border-radius: 10px;
-    background: var(--ember-soft);
-    color: var(--ember-text);
-  }
-  .action span {
-    color: var(--text-3);
-    font-size: 12.5px;
-  }
-  .action span :global(kbd) {
-    height: 17px;
-    font-size: 10px;
-  }
-  .action.live {
-    border-color: color-mix(in srgb, var(--ember) 40%, transparent);
-  }
-  .action.live .ic {
-    background: var(--ember);
-    color: #fff;
-  }
-  .ask {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-top: 14px;
-    padding: 6px 6px 6px 14px;
-    border-radius: var(--r);
-  }
-  .ask :global(svg:first-child) {
-    color: var(--ember-text);
-    flex: none;
-  }
-  .ask input {
-    flex: 1;
-    height: 32px;
-    border: 0;
-    outline: 0;
-    background: none;
-    color: var(--text);
-    font: inherit;
-    font-size: 14px;
-  }
-  .ask input::placeholder {
-    color: var(--text-3);
-  }
-  .answer {
-    margin-top: 8px;
-    padding: 16px 20px;
-    border-radius: var(--r);
-    max-height: 360px;
-    overflow: auto;
-  }
-  .stats {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    margin: 30px 0;
-    border-top: 1px solid var(--line);
-    border-bottom: 1px solid var(--line);
-  }
-  .stat {
-    display: flex;
-    flex-direction: column;
-    padding: 18px 4px;
-  }
-  .stat + .stat {
-    padding-left: 20px;
-    border-left: 1px solid var(--line);
-  }
-  .num {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-family: var(--serif);
-    font-size: 28px;
-    line-height: 1.1;
-  }
-  .num :global(.flame) {
-    color: var(--ember);
-  }
-  .lbl {
-    color: var(--text-3);
-    font-size: 12px;
-    margin-top: 4px;
-  }
-  .cols {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 28px;
-  }
-  .head {
-    justify-content: space-between;
-    margin-bottom: 8px;
-  }
-  .head h3 {
-    font-family: var(--sans);
-    font-size: 13px;
-    font-weight: 650;
-  }
-  .dict {
-    padding: 10px 0;
-    border-top: 1px solid var(--line);
-  }
-  .dict p {
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-    margin-bottom: 2px;
-  }
-  .rec {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 8px;
-    margin: 0 -8px;
-    border-radius: var(--r-sm);
-    color: inherit;
-  }
-  .rec:hover {
-    background: var(--surface-2);
-  }
-  .rec > :global(svg) {
-    color: var(--text-3);
-    flex: none;
-  }
-  .rec div {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-  }
-  .rec b {
-    font-weight: 500;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .pad {
-    padding: 10px 0;
-  }
-</style>
+</Page>

@@ -11,7 +11,18 @@
   import Chat from "#lib/components/Chat.svelte";
   import Markdown from "#lib/components/Markdown.svelte";
   import ExportMenu from "#lib/components/ExportMenu.svelte";
-  import Modal from "#lib/components/Modal.svelte";
+  import { Button } from "#lib/components/ui/button/index.js";
+  import { Badge } from "#lib/components/ui/badge/index.js";
+  import { Input } from "#lib/components/ui/input/index.js";
+  import { Label } from "#lib/components/ui/label/index.js";
+  import { Textarea } from "#lib/components/ui/textarea/index.js";
+  import { Progress } from "#lib/components/ui/progress/index.js";
+  import * as Tabs from "#lib/components/ui/tabs/index.js";
+  import * as Dialog from "#lib/components/ui/dialog/index.js";
+  import * as Select from "#lib/components/ui/select/index.js";
+  import * as DropdownMenu from "#lib/components/ui/dropdown-menu/index.js";
+  import * as InputGroup from "#lib/components/ui/input-group/index.js";
+  import * as Empty from "#lib/components/ui/empty/index.js";
   import {
     ChevronLeft,
     Ellipsis,
@@ -26,6 +37,9 @@
     LoaderCircle,
     CircleAlert,
     Pencil,
+    MessageCircle,
+    ExternalLink,
+    SearchX,
   } from "@lucide/svelte";
 
   const id = $derived(page.params.id!);
@@ -38,7 +52,6 @@
   let query = $state("");
   let searchOpen = $state(false);
   let panel = $state<"summary" | "chat">("summary");
-  let more = $state(false);
 
   // The recording a summary is being generated for, if any.
   let summarizingFor = $state<string | null>(null);
@@ -50,6 +63,8 @@
   let retxOpen = $state(false);
   let retxProfile = $state("");
   let retxLang = $state<string | null>(null);
+  // Select values are strings; "auto" stands for no fixed language.
+  const AUTO = "auto";
   let trOpen = $state(false);
   let trLang = $state("English");
   let translating = $state(false);
@@ -172,76 +187,125 @@
   }
 </script>
 
-<svelte:window onkeydown={keys} onclick={(e) => more && !(e.target as HTMLElement).closest(".more") && (more = false)} />
+<svelte:window onkeydown={keys} />
+
+{#snippet aiHint(text: string)}
+  <div class="flex flex-col items-start gap-3 rounded-xl border border-dashed p-4">
+    <div class="grid size-9 place-items-center rounded-lg bg-ember-soft text-ember-text"><Sparkles class="size-4" /></div>
+    <p class="text-xs leading-relaxed text-muted-foreground">{@html text}</p>
+  </div>
+{/snippet}
 
 {#if !loaded}
   <div></div>
 {:else if !rec}
-  <div class="empty" style="margin-top:80px"><h3>Not found</h3><a href="/files">Back to files</a></div>
+  <Empty.Root class="mt-20">
+    <Empty.Header>
+      <Empty.Media variant="icon"><SearchX /></Empty.Media>
+      <Empty.Title>Not found</Empty.Title>
+      <Empty.Description>This file may have been deleted.</Empty.Description>
+    </Empty.Header>
+    <Empty.Content><Button variant="outline" size="sm" href="/files"><ChevronLeft /> Back to files</Button></Empty.Content>
+  </Empty.Root>
 {:else}
-  <div class="detail">
-    <header>
-      <a class="back" href="/files"><ChevronLeft size={15} /> Files</a>
-      <div class="titlerow">
+  <div class="flex h-full min-h-0 flex-col">
+    <header class="shrink-0 border-b px-8 pt-10 pb-4">
+      <a class="relative z-10 -ml-1 inline-flex items-center gap-0.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground" href="/files">
+        <ChevronLeft class="size-3.5" /> Files
+      </a>
+      <div class="mt-1 flex items-center gap-1.5">
         <input
-          class="title selectable"
+          class="selectable heading field-sizing-content -ml-1.5 max-w-full min-w-32 truncate rounded-lg border border-transparent bg-transparent px-1.5 py-0.5 text-[26px] leading-tight outline-none hover:border-border focus:border-ring focus:bg-background focus:ring-3 focus:ring-ring/20"
           value={rec.title}
           onchange={(e) => patch({ title: e.currentTarget.value.trim() || rec!.title })}
           onkeydown={(e) => e.key === "Enter" && e.currentTarget.blur()}
         />
-        <button class="btn icon sm ghost star" class:on={rec.starred} title="Star" onclick={() => patch({ starred: !rec!.starred })}>
-          <Star size={15} fill={rec.starred ? "currentColor" : "none"} />
-        </button>
-        <span class="spacer"></span>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          class={rec.starred ? "text-amber hover:text-amber" : "text-muted-foreground"}
+          title="Star"
+          onclick={() => patch({ starred: !rec!.starred })}
+        >
+          <Star fill={rec.starred ? "currentColor" : "none"} />
+        </Button>
+        <span class="flex-1"></span>
         {#if rec.status === "ready"}
-          <button class="btn sm ghost" title="Search (⌘F)" onclick={() => (searchOpen = !searchOpen)}><Search size={14} /></button>
+          <Button variant="ghost" size="icon-sm" class="text-muted-foreground" title="Search (⌘F)" onclick={() => (searchOpen = !searchOpen)}><Search /></Button>
           <ExportMenu {id} title={rec.title} hasNotes={!!rec.summary} {hasSpeakers} />
         {/if}
-        <div class="more">
-          <button class="btn sm icon" onclick={() => (more = !more)}><Ellipsis size={15} /></button>
-          {#if more}
-            <div class="menu card">
-              <button onclick={() => { more = false; retxProfile = rec!.stt ?? app.settings!.files.stt_profile; retxLang = rec!.language; retxOpen = true; }} disabled={!!busy}>
-                <RefreshCw size={14} /> Transcribe again…
-              </button>
-              {#if app.settings?.llm_profiles.length}
-                <button onclick={() => { more = false; trOpen = true; }} disabled={rec.status !== "ready"}><Languages size={14} /> Translate…</button>
-              {/if}
-              {#if rec.media_path}
-                <button onclick={() => { more = false; api.reveal(rec!.media_path!); }}><FolderOpen size={14} /> Show in Finder</button>
-              {/if}
-              <div class="sep"></div>
-              <button class="danger" onclick={remove}><Trash2 size={14} /> Delete</button>
-            </div>
-          {/if}
-        </div>
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger>
+            {#snippet child({ props })}
+              <Button variant="outline" size="icon-sm" title="More" {...props}><Ellipsis /></Button>
+            {/snippet}
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Content align="end" class="w-52">
+            <DropdownMenu.Item
+              disabled={!!busy}
+              onclick={() => {
+                retxProfile = rec!.stt ?? app.settings!.files.stt_profile;
+                retxLang = rec!.language;
+                retxOpen = true;
+              }}
+            >
+              <RefreshCw /> Transcribe again…
+            </DropdownMenu.Item>
+            {#if app.settings?.llm_profiles.length}
+              <DropdownMenu.Item disabled={rec.status !== "ready"} onclick={() => (trOpen = true)}><Languages /> Translate…</DropdownMenu.Item>
+            {/if}
+            {#if rec.media_path}
+              <DropdownMenu.Item onclick={() => api.reveal(rec!.media_path!)}><FolderOpen /> Show in Finder</DropdownMenu.Item>
+            {/if}
+            <DropdownMenu.Separator />
+            <DropdownMenu.Item variant="destructive" onclick={remove}><Trash2 /> Delete</DropdownMenu.Item>
+          </DropdownMenu.Content>
+        </DropdownMenu.Root>
       </div>
-      <div class="meta faint small">
-        <span>{relDate(rec.created_at)}</span>
-        {#if rec.duration_ms}<span>{duration(rec.duration_ms)}</span>{/if}
-        {#if rec.segments.length}<span>{words(rec.segments.map((s) => s.text).join(" ")).toLocaleString()} words</span>{/if}
-        {#if rec.language}<span>{languageName(rec.language)}</span>{/if}
-        {#if rec.stt}<span>{app.sttName(rec.stt)}</span>{/if}
-        {#if rec.source && /^https?:/.test(rec.source)}<a href={rec.source} target="_blank" rel="noreferrer">Source</a>{/if}
+      <div class="mt-2 flex flex-wrap items-center gap-1.5">
+        <Badge variant="secondary" class="font-normal">{relDate(rec.created_at)}</Badge>
+        {#if rec.duration_ms}<Badge variant="secondary" class="font-normal">{duration(rec.duration_ms)}</Badge>{/if}
+        {#if rec.segments.length}<Badge variant="secondary" class="font-normal">{words(rec.segments.map((s) => s.text).join(" ")).toLocaleString()} words</Badge>{/if}
+        {#if rec.language}<Badge variant="outline" class="font-normal text-muted-foreground">{languageName(rec.language)}</Badge>{/if}
+        {#if rec.stt}<Badge variant="outline" class="font-normal text-muted-foreground">{app.sttName(rec.stt)}</Badge>{/if}
+        {#if rec.source && /^https?:/.test(rec.source)}
+          <Badge variant="outline" href={rec.source} target="_blank" rel="noreferrer" class="font-normal text-ember-text">Source <ExternalLink /></Badge>
+        {/if}
       </div>
     </header>
 
-    <div class="cols">
-      <div class="left">
+    <div class="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_340px]">
+      <div class="relative flex min-h-0 min-w-0 flex-col">
         {#if searchOpen}
-          <div class="tsearch">
-            <Search size={14} />
-            <input class="selectable" placeholder="Find in transcript" bind:value={query} onkeydown={(e) => e.key === "Enter" && transcriptView?.scrollToFirstMatch()} />
-            {#if query}<span class="faint small">{matches} {matches === 1 ? "match" : "matches"}</span>{/if}
-            <button class="btn icon sm ghost" aria-label="Close search" onclick={() => { searchOpen = false; query = ""; }}><X size={13} /></button>
+          <div class="tsearch shrink-0 px-8 pt-4">
+            <InputGroup.Root class="bg-background">
+              <InputGroup.Addon><Search /></InputGroup.Addon>
+              <InputGroup.Input
+                class="selectable"
+                placeholder="Find in transcript"
+                bind:value={query}
+                onkeydown={(e) => e.key === "Enter" && transcriptView?.scrollToFirstMatch()}
+              />
+              <InputGroup.Addon align="inline-end">
+                {#if query}<InputGroup.Text class="text-xs font-normal">{matches} {matches === 1 ? "match" : "matches"}</InputGroup.Text>{/if}
+                <InputGroup.Button
+                  size="icon-xs"
+                  aria-label="Close search"
+                  onclick={() => {
+                    searchOpen = false;
+                    query = "";
+                  }}><X /></InputGroup.Button
+                >
+              </InputGroup.Addon>
+            </InputGroup.Root>
           </div>
         {/if}
 
-        <div class="scroll">
+        <div class="scroll flex flex-1 flex-col overflow-y-auto px-8 pt-6 pb-8">
           {#if busy}
-            <div class="state">
-              <LoaderCircle size={22} class="spin" />
-              <h3>
+            <div class="m-auto flex flex-col items-center gap-3 p-10 text-center">
+              <div class="grid size-12 place-items-center rounded-2xl bg-ember-soft text-ember-text"><LoaderCircle class="size-5 animate-spin" /></div>
+              <h3 class="heading text-xl">
                 {rec.status === "queued"
                   ? "Waiting in queue"
                   : job?.stage === "downloading"
@@ -250,23 +314,42 @@
                       ? "Reading audio"
                       : "Transcribing"}
               </h3>
-              <div class="progress" class:indeterminate={!job || job.progress <= 0} style="width:260px">
-                <div style:width="{(job?.progress ?? 0) * 100}%"></div>
-              </div>
-              <p class="faint small">{app.sttName(rec.stt ?? app.settings?.files.stt_profile)} · you can keep using Hush meanwhile</p>
-              <button class="btn sm" onclick={() => api.cancelJob(id)}>Cancel</button>
+              {#if job && job.progress > 0}
+                <Progress value={job.progress * 100} class="w-64" />
+              {:else}
+                <div class="relative h-1 w-64 overflow-hidden rounded-full bg-muted"><div class="h-full w-1/3 animate-indeterminate rounded-full bg-primary"></div></div>
+              {/if}
+              <p class="text-xs text-muted-foreground">{app.sttName(rec.stt ?? app.settings?.files.stt_profile)} · you can keep using Hush meanwhile</p>
+              <Button variant="outline" size="sm" onclick={() => api.cancelJob(id)}>Cancel</Button>
             </div>
           {:else if rec.status === "error"}
-            <div class="state">
-              <CircleAlert size={22} />
-              <h3>Transcription failed</h3>
-              <p class="muted selectable err">{rec.error}</p>
-              <button class="btn sm" onclick={() => { retxProfile = rec!.stt ?? app.settings!.files.stt_profile; retxLang = rec!.language; retxOpen = true; }}>
-                <RefreshCw size={13} /> Try again
-              </button>
-            </div>
+            <Empty.Root class="m-auto">
+              <Empty.Header>
+                <Empty.Media variant="icon" class="bg-destructive/10 text-destructive"><CircleAlert /></Empty.Media>
+                <Empty.Title class="heading text-xl">Transcription failed</Empty.Title>
+                <Empty.Description class="selectable max-w-md [overflow-wrap:anywhere]">{rec.error}</Empty.Description>
+              </Empty.Header>
+              <Empty.Content>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onclick={() => {
+                    retxProfile = rec!.stt ?? app.settings!.files.stt_profile;
+                    retxLang = rec!.language;
+                    retxOpen = true;
+                  }}
+                >
+                  <RefreshCw /> Try again
+                </Button>
+              </Empty.Content>
+            </Empty.Root>
           {:else if !rec.segments.length}
-            <div class="state"><h3>No speech found</h3><p class="muted">This file didn't contain recognizable speech.</p></div>
+            <Empty.Root class="m-auto">
+              <Empty.Header>
+                <Empty.Title class="heading text-xl">No speech found</Empty.Title>
+                <Empty.Description>This file didn't contain recognizable speech.</Empty.Description>
+              </Empty.Header>
+            </Empty.Root>
           {:else}
             <Transcript
               bind:this={transcriptView}
@@ -283,302 +366,132 @@
         </div>
 
         {#if rec.media_path || rec.audio_path}
-          <div class="playerwrap">
+          <div class="shrink-0 px-6 pt-1 pb-4">
             <Player bind:this={player} path={rec.media_path ?? rec.audio_path} fallback={rec.audio_path} bind:currentMs durationMs={rec.duration_ms} />
           </div>
         {/if}
       </div>
 
-      <aside class="right">
-        <div class="tabs">
-          <button class:on={panel === "summary"} onclick={() => (panel = "summary")}>Summary</button>
-          <button class:on={panel === "chat"} onclick={() => (panel = "chat")}>Ask</button>
-        </div>
+      <aside class="flex min-h-0 flex-col gap-4 border-l bg-muted/30 p-4">
+        <Tabs.Root bind:value={() => panel, (v) => (panel = v as typeof panel)}>
+          <Tabs.List class="w-full">
+            <Tabs.Trigger value="summary"><Sparkles /> Summary</Tabs.Trigger>
+            <Tabs.Trigger value="chat"><MessageCircle /> Ask</Tabs.Trigger>
+          </Tabs.List>
+        </Tabs.Root>
         {#if !app.settings?.llm_profiles.length}
-          <div class="noai">
-            <Sparkles size={18} />
-            <p class="muted small">Connect an AI in <a href="/settings?tab=ai">Settings → AI</a> to summarize, translate and chat with transcripts.</p>
-          </div>
+          {@render aiHint('Connect an AI in <a href="/settings?tab=ai">Settings → AI</a> to summarize, translate and chat with transcripts.')}
         {:else if panel === "summary"}
-          <div class="summary">
+          <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
             {#if rec.summary || summarizing}
               {#if editingSummary}
-                <textarea class="textarea" bind:value={summaryDraft} rows="18"></textarea>
-                <div class="row">
-                  <button class="btn sm primary" onclick={() => { patch({ summary: summaryDraft }); editingSummary = false; }}>Save</button>
-                  <button class="btn sm ghost" onclick={() => (editingSummary = false)}>Cancel</button>
+                <Textarea bind:value={summaryDraft} rows={18} class="field-sizing-fixed bg-background" />
+                <div class="flex gap-1.5">
+                  <Button
+                    size="sm"
+                    onclick={() => {
+                      patch({ summary: summaryDraft });
+                      editingSummary = false;
+                    }}>Save</Button
+                  >
+                  <Button variant="ghost" size="sm" onclick={() => (editingSummary = false)}>Cancel</Button>
                 </div>
               {:else}
-                <Markdown source={rec.summary || "…"} />
-                <div class="row acts">
+                <Markdown source={rec.summary || "…"} class="text-[13.5px]" />
+                <div class="flex gap-1">
                   {#if summarizing}
-                    <button class="btn sm" onclick={() => api.cancelLlm(summaryReq)}>Stop</button>
+                    <Button variant="outline" size="sm" onclick={() => api.cancelLlm(summaryReq)}><LoaderCircle class="animate-spin" /> Stop</Button>
                   {:else}
-                    <button class="btn sm ghost" onclick={summarize}><RefreshCw size={13} /> Regenerate</button>
-                    <button class="btn sm ghost" onclick={() => { summaryDraft = rec!.summary; editingSummary = true; }}><Pencil size={13} /> Edit</button>
+                    <Button variant="ghost" size="sm" class="text-muted-foreground" onclick={summarize}><RefreshCw /> Regenerate</Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      class="text-muted-foreground"
+                      onclick={() => {
+                        summaryDraft = rec!.summary;
+                        editingSummary = true;
+                      }}><Pencil /> Edit</Button
+                    >
                   {/if}
                 </div>
               {/if}
             {:else}
-              <div class="noai">
-                <Sparkles size={18} />
-                <p class="muted small">Get the gist, key points and action items in a few seconds.</p>
-                <button class="btn sm primary" disabled={rec.status !== "ready" || !rec.segments.length} onclick={summarize}>Summarize</button>
+              <div class="flex flex-col items-start gap-3 rounded-xl border bg-background p-4 shadow-xs">
+                <div class="grid size-9 place-items-center rounded-lg bg-ember-soft text-ember-text"><Sparkles class="size-4" /></div>
+                <div>
+                  <p class="text-sm font-medium">Summarize this file</p>
+                  <p class="mt-0.5 text-xs text-muted-foreground">Get the gist, key points and action items in a few seconds.</p>
+                </div>
+                <Button size="sm" disabled={rec.status !== "ready" || !rec.segments.length} onclick={summarize}>Summarize</Button>
               </div>
             {/if}
           </div>
         {:else}
-          <Chat
-            {id}
-            bind:messages={rec.chat}
-            llmName={app.llmName(app.settings.files.llm_profile)}
-            suggestions={["What are the key takeaways?", "List every action item with an owner", "What questions were left unanswered?"]}
-          />
+          <div class="min-h-0 flex-1">
+            <Chat
+              {id}
+              bind:messages={rec.chat}
+              llmName={app.llmName(app.settings.files.llm_profile)}
+              suggestions={["What are the key takeaways?", "List every action item with an owner", "What questions were left unanswered?"]}
+            />
+          </div>
         {/if}
       </aside>
     </div>
   </div>
 {/if}
 
-<Modal bind:open={retxOpen} title="Transcribe again" width={440}>
-  <div class="stack">
-    <label class="stack" style="gap:6px">
-      <span class="eyebrow">Speech model</span>
-      <select class="select" bind:value={retxProfile}>
-        {#each app.settings?.stt_profiles ?? [] as p}<option value={p.id}>{app.sttName(p.id)}</option>{/each}
-      </select>
-    </label>
-    <label class="stack" style="gap:6px">
-      <span class="eyebrow">Language</span>
-      <select class="select" bind:value={retxLang}>
-        <option value={null}>Auto-detect</option>
-        {#each LANGUAGES as [c, n]}<option value={c}>{n}</option>{/each}
-      </select>
-    </label>
-    <p class="faint small">Edits to the current transcript will be replaced.</p>
-  </div>
-  {#snippet footer()}
-    <button class="btn ghost" onclick={() => (retxOpen = false)}>Cancel</button>
-    <button class="btn primary" onclick={retranscribe}>Transcribe</button>
-  {/snippet}
-</Modal>
+<Dialog.Root bind:open={retxOpen}>
+  <Dialog.Content class="sm:max-w-md">
+    <Dialog.Header>
+      <Dialog.Title class="heading text-xl">Transcribe again</Dialog.Title>
+      <Dialog.Description>Edits to the current transcript will be replaced.</Dialog.Description>
+    </Dialog.Header>
+    <div class="grid gap-4 py-1">
+      <div class="grid gap-1.5">
+        <Label class="text-xs text-muted-foreground">Speech model</Label>
+        <Select.Root type="single" bind:value={retxProfile}>
+          <Select.Trigger class="w-full"><span class="truncate">{app.sttName(retxProfile)}</span></Select.Trigger>
+          <Select.Content>
+            {#each app.settings?.stt_profiles ?? [] as p}<Select.Item value={p.id} label={app.sttName(p.id)} />{/each}
+          </Select.Content>
+        </Select.Root>
+      </div>
+      <div class="grid gap-1.5">
+        <Label class="text-xs text-muted-foreground">Language</Label>
+        <Select.Root type="single" bind:value={() => retxLang ?? AUTO, (v) => (retxLang = v === AUTO ? null : v)}>
+          <Select.Trigger class="w-full">{languageName(retxLang)}</Select.Trigger>
+          <Select.Content class="max-h-72">
+            <Select.Item value={AUTO} label="Auto-detect" />
+            <Select.Separator />
+            {#each LANGUAGES as [c, n]}<Select.Item value={c} label={n} />{/each}
+          </Select.Content>
+        </Select.Root>
+      </div>
+    </div>
+    <Dialog.Footer>
+      <Button variant="ghost" onclick={() => (retxOpen = false)}>Cancel</Button>
+      <Button onclick={retranscribe}><RefreshCw /> Transcribe</Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
 
-<Modal bind:open={trOpen} title="Translate transcript" width={420}>
-  <div class="stack">
-    <p class="muted small">Creates a translated copy with the same timestamps, using {app.llmName(app.settings?.files.llm_profile)}.</p>
-    <input class="input" list="langs" bind:value={trLang} placeholder="Language" />
-    <datalist id="langs">{#each LANGUAGES as [, n]}<option value={n}></option>{/each}</datalist>
-  </div>
-  {#snippet footer()}
-    <button class="btn ghost" onclick={() => (trOpen = false)}>Cancel</button>
-    <button class="btn primary" disabled={translating || !trLang.trim()} onclick={translate}>
-      {#if translating}<LoaderCircle size={14} class="spin" /> Translating…{:else}Translate{/if}
-    </button>
-  {/snippet}
-</Modal>
-
-<style>
-  .detail {
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-  }
-  header {
-    padding: 38px 32px 14px 40px;
-    border-bottom: 1px solid var(--line);
-    flex: none;
-  }
-  .back {
-    position: relative;
-    z-index: 6;
-    display: inline-flex;
-    align-items: center;
-    gap: 2px;
-    margin-left: -4px;
-    color: var(--text-3);
-    font-size: 12.5px;
-  }
-  .back:hover {
-    color: var(--text);
-  }
-  .titlerow {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: 4px;
-  }
-  .title {
-    flex: 0 1 auto;
-    field-sizing: content;
-    min-width: 120px;
-    max-width: 100%;
-    padding: 2px 6px;
-    margin-left: -6px;
-    border: 1px solid transparent;
-    border-radius: var(--r-sm);
-    background: none;
-    color: var(--text);
-    font-family: var(--serif);
-    font-size: 26px;
-    font-weight: 500;
-    outline: none;
-    text-overflow: ellipsis;
-  }
-  .title:hover {
-    border-color: var(--line);
-  }
-  .title:focus {
-    border-color: var(--line-2);
-    background: var(--surface);
-  }
-  .star.on {
-    color: var(--amber);
-  }
-  .meta {
-    display: flex;
-    gap: 14px;
-    margin-top: 2px;
-  }
-  .more {
-    position: relative;
-  }
-  .menu {
-    position: absolute;
-    right: 0;
-    top: 32px;
-    z-index: 40;
-    width: 210px;
-    padding: 5px;
-    border-radius: var(--r);
-    box-shadow: var(--shadow-pop);
-    display: flex;
-    flex-direction: column;
-  }
-  .menu button {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    padding: 7px 8px;
-    border: 0;
-    border-radius: 6px;
-    background: none;
-    color: inherit;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-  }
-  .menu button:hover {
-    background: var(--surface-2);
-  }
-  .menu button:disabled {
-    opacity: 0.4;
-    pointer-events: none;
-  }
-  .menu .danger {
-    color: var(--ember-text);
-  }
-  .sep {
-    height: 1px;
-    margin: 4px;
-    background: var(--line);
-  }
-  .cols {
-    flex: 1;
-    min-height: 0;
-    display: grid;
-    grid-template-columns: 1fr 340px;
-  }
-  .left {
-    position: relative;
-    min-width: 0;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-  }
-  .tsearch {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin: 12px 32px 0 40px;
-    padding: 4px 4px 4px 12px;
-    border-radius: var(--r-sm);
-    background: var(--surface-2);
-  }
-  .tsearch input {
-    flex: 1;
-    height: 26px;
-    border: 0;
-    outline: 0;
-    background: none;
-    color: var(--text);
-    font: inherit;
-  }
-  .scroll {
-    flex: 1;
-    overflow-y: auto;
-    padding: 22px 32px 30px 26px;
-    display: flex;
-    flex-direction: column;
-  }
-  .playerwrap {
-    padding: 10px 24px 16px;
-    flex: none;
-  }
-  .state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 10px;
-    margin: auto;
-    padding: 40px;
-    text-align: center;
-    color: var(--text-2);
-  }
-  .state h3 {
-    color: var(--text);
-    font-size: 18px;
-  }
-  .state :global(svg) {
-    color: var(--ember-text);
-  }
-  .err {
-    max-width: 480px;
-    overflow-wrap: anywhere;
-  }
-  .right {
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    padding: 16px 20px 16px;
-    border-left: 1px solid var(--line);
-    background: var(--bg-sidebar);
-  }
-  .right .tabs {
-    align-self: flex-start;
-  }
-  .summary {
-    flex: 1;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-  .summary :global(.prose) {
-    font-size: 13.5px;
-  }
-  .acts {
-    gap: 4px;
-  }
-  .noai {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 10px;
-    padding: 6px 2px;
-  }
-  .noai :global(svg) {
-    color: var(--ember-text);
-  }
-</style>
+<Dialog.Root bind:open={trOpen}>
+  <Dialog.Content class="sm:max-w-md">
+    <Dialog.Header>
+      <Dialog.Title class="heading text-xl">Translate transcript</Dialog.Title>
+      <Dialog.Description>Creates a translated copy with the same timestamps, using {app.llmName(app.settings?.files.llm_profile)}.</Dialog.Description>
+    </Dialog.Header>
+    <div class="grid gap-1.5 py-1">
+      <Label for="tr-lang" class="text-xs text-muted-foreground">Language</Label>
+      <Input id="tr-lang" list="langs" bind:value={trLang} placeholder="Language" />
+      <datalist id="langs">{#each LANGUAGES as [, n]}<option value={n}></option>{/each}</datalist>
+    </div>
+    <Dialog.Footer>
+      <Button variant="ghost" onclick={() => (trOpen = false)}>Cancel</Button>
+      <Button disabled={translating || !trLang.trim()} onclick={translate}>
+        {#if translating}<LoaderCircle class="animate-spin" /> Translating…{:else}<Languages /> Translate{/if}
+      </Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>

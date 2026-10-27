@@ -7,93 +7,50 @@
   import DictationTab from "#lib/settings/Dictation.svelte";
   import Meetings from "#lib/settings/Meetings.svelte";
   import Permissions from "#lib/settings/Permissions.svelte";
+  import Page from "#lib/components/Page.svelte";
+  import PageHeader from "#lib/components/PageHeader.svelte";
+  import { cn } from "#lib/utils.js";
   import { AudioLines, Cog, Keyboard, ShieldCheck, Sparkles, Users } from "@lucide/svelte";
 
   const TABS = [
-    { id: "general", label: "General", icon: Cog },
-    { id: "speech", label: "Speech", icon: AudioLines },
-    { id: "ai", label: "AI", icon: Sparkles },
-    { id: "dictation", label: "Dictation", icon: Keyboard },
-    { id: "meetings", label: "Meetings", icon: Users },
-    { id: "permissions", label: "Permissions", icon: ShieldCheck },
+    { id: "general", label: "General", icon: Cog, description: "Startup, appearance, history and media tools." },
+    { id: "speech", label: "Speech", icon: AudioLines, description: "On-device models and cloud transcription providers." },
+    { id: "ai", label: "AI", icon: Sparkles, description: "Agent CLIs and API providers for polish, notes and chat." },
+    { id: "dictation", label: "Dictation", icon: Keyboard, description: "Hotkeys, recognition, output and feedback." },
+    { id: "meetings", label: "Meetings", icon: Users, description: "Recording, notes, templates and recipes." },
+    { id: "permissions", label: "Permissions", icon: ShieldCheck, description: "What Hush is allowed to do on this Mac." },
   ] as const;
 
   const tab = $derived(page.url.searchParams.get("tab") ?? "general");
+  const current = $derived(TABS.find((t) => t.id === tab) ?? TABS[0]);
 </script>
 
-<div class="settings">
-  <nav>
-    <h1>Settings</h1>
-    {#each TABS as t}
-      <button class:on={tab === t.id} onclick={() => goto(`/settings?tab=${t.id}`, { replace: true, reset: false })}>
-        <t.icon size={15} strokeWidth={1.8} />
-        {t.label}
-      </button>
-    {/each}
-  </nav>
-  <div class="content">
-    <div class="inner">
-      {#if tab === "speech"}<Speech />
-      {:else if tab === "ai"}<Ai />
-      {:else if tab === "dictation"}<DictationTab />
-      {:else if tab === "meetings"}<Meetings />
-      {:else if tab === "permissions"}<Permissions />
+<Page>
+  <div class="grid grid-cols-[176px_minmax(0,1fr)] gap-12">
+    <nav class="sticky top-0 flex flex-col gap-0.5 self-start pt-1">
+      <h1 class="heading mb-5 px-2.5 text-[26px] leading-none">Settings</h1>
+      {#each TABS as t}
+        <button
+          class={cn(
+            "flex h-8 items-center gap-2.5 rounded-md px-2.5 text-left text-[13px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+            current.id === t.id && "bg-accent text-foreground [&_svg]:text-ember-text",
+          )}
+          onclick={() => goto(`/settings?tab=${t.id}`, { replace: true, reset: false })}
+        >
+          <t.icon class="size-4" strokeWidth={1.8} />
+          {t.label}
+        </button>
+      {/each}
+    </nav>
+
+    <div class="max-w-2xl min-w-0">
+      <PageHeader title={current.label} description={current.description} class="mb-7" />
+      {#if current.id === "speech"}<Speech />
+      {:else if current.id === "ai"}<Ai />
+      {:else if current.id === "dictation"}<DictationTab />
+      {:else if current.id === "meetings"}<Meetings />
+      {:else if current.id === "permissions"}<Permissions />
       {:else}<General />{/if}
     </div>
   </div>
-</div>
-
-<style>
-  .settings {
-    height: 100%;
-    display: flex;
-    min-height: 0;
-  }
-  nav {
-    width: 200px;
-    flex: none;
-    padding: 44px 12px 20px 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-  }
-  nav h1 {
-    font-size: 24px;
-    margin: 0 0 18px 8px;
-  }
-  nav button {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    height: 32px;
-    padding: 0 10px;
-    border: 0;
-    border-radius: var(--r-sm);
-    background: none;
-    color: var(--text-2);
-    font: inherit;
-    font-weight: 500;
-    text-align: left;
-    cursor: pointer;
-  }
-  nav button:hover {
-    background: var(--surface-2);
-    color: var(--text);
-  }
-  nav button.on {
-    background: var(--surface-2);
-    color: var(--text);
-  }
-  nav button.on :global(svg) {
-    color: var(--ember-text);
-  }
-  .content {
-    flex: 1;
-    min-width: 0;
-    overflow-y: auto;
-    padding: 48px 40px 60px 20px;
-  }
-  .inner {
-    max-width: 720px;
-  }
-</style>
+</Page>

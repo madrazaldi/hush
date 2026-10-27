@@ -3,10 +3,20 @@
   import { open } from "#lib/ipc.js";
   import { api, errorText, on } from "#lib/api.js";
   import { app } from "#lib/state.svelte.js";
-  import { duration, relDate, LANGUAGES } from "#lib/format.js";
+  import { duration, relDate, languageName, LANGUAGES } from "#lib/format.js";
   import { MEDIA_EXTS, isVideo } from "#lib/media.js";
   import type { JobProgress, RecordingSummary } from "#lib/types.js";
-  import { FileAudio, FileVideo, Link, Search, Star, Upload, X, CircleAlert, LoaderCircle } from "@lucide/svelte";
+  import Page from "#lib/components/Page.svelte";
+  import PageHeader from "#lib/components/PageHeader.svelte";
+  import { Button } from "#lib/components/ui/button/index.js";
+  import { Checkbox } from "#lib/components/ui/checkbox/index.js";
+  import { Label } from "#lib/components/ui/label/index.js";
+  import { Progress } from "#lib/components/ui/progress/index.js";
+  import * as Select from "#lib/components/ui/select/index.js";
+  import * as InputGroup from "#lib/components/ui/input-group/index.js";
+  import * as Item from "#lib/components/ui/item/index.js";
+  import * as Empty from "#lib/components/ui/empty/index.js";
+  import { FileAudio, FileVideo, Link, Search, Star, Upload, X, CircleAlert, LoaderCircle, FolderOpen } from "@lucide/svelte";
 
   let items = $state<RecordingSummary[]>([]);
   let query = $state("");
@@ -15,6 +25,8 @@
   let progress = $state<Record<string, JobProgress>>({});
 
   const s = $derived(app.settings!);
+  // Select values are strings; "auto" stands for no fixed language.
+  const AUTO = "auto";
 
   $effect(() => {
     app.recordingsVersion;
@@ -70,245 +82,171 @@
   }
 </script>
 
-<div class="page">
-  <div class="page-narrow">
-    <div class="page-head">
-      <div>
-        <h1>Files</h1>
-        <p class="sub">Transcribe recordings, voice memos, podcasts and videos. Everything stays searchable.</p>
-      </div>
-    </div>
+<Page>
+  <PageHeader title="Files" description="Transcribe recordings, voice memos, podcasts and videos. Everything stays searchable.">
+    {#snippet actions()}
+      <Button onclick={pick}><Upload /> Choose files</Button>
+    {/snippet}
+  </PageHeader>
 
-    <div class="import card">
-      <button class="drop" onclick={pick}>
-        <Upload size={22} strokeWidth={1.6} />
-        <b>Drop files anywhere, or click to choose</b>
-        <span class="faint small">MP3, M4A, WAV, FLAC, MP4, MOV and more{app.info && !app.info.ffmpeg ? " · install ffmpeg for more formats" : ""}</span>
-      </button>
-      <form class="url" onsubmit={addUrl}>
-        <Link size={14} />
-        <input class="selectable" placeholder={app.info?.ytdlp ? "Paste a YouTube, podcast or media link" : "Paste a direct link to an audio or video file"} bind:value={url} />
-        <button class="btn sm primary" disabled={!url.trim() || adding}>{adding ? "Adding…" : "Transcribe"}</button>
-      </form>
-      <div class="opts">
-        <label>
-          <span>Model</span>
-          <select class="select" bind:value={s.files.stt_profile} onchange={() => app.save()}>
-            {#each s.stt_profiles as p}<option value={p.id}>{app.sttName(p.id)}</option>{/each}
-          </select>
-        </label>
-        <label>
-          <span>Language</span>
-          <select class="select" bind:value={s.files.language} onchange={() => app.save()}>
-            <option value={null}>Auto-detect</option>
-            {#each LANGUAGES as [c, n]}<option value={c}>{n}</option>{/each}
-          </select>
-        </label>
-        <label class="chk">
-          <input type="checkbox" bind:checked={s.files.diarize} onchange={() => app.save()} />
-          <span>Identify speakers <span class="faint">(cloud providers)</span></span>
-        </label>
-        {#if s.llm_profiles.length}
-          <label class="chk">
-            <input type="checkbox" bind:checked={s.files.auto_summarize} onchange={() => app.save()} />
-            <span>Summarize automatically</span>
-          </label>
-        {/if}
-      </div>
-    </div>
-
-    <div class="row tools">
-      <div class="search spacer">
-        <Search size={14} />
-        <input class="input" placeholder="Search titles and transcripts" bind:value={query} />
-      </div>
-    </div>
-
-    <div class="list">
-      {#each items as r (r.id)}
-        {@const st = status(r)}
-        <a class="item" href={`/files/${r.id}`}>
-          <div class="ic" class:busy={st.st === "processing" || st.st === "queued"}>
-            {#if st.st === "error"}<CircleAlert size={16} />
-            {:else if st.st === "processing"}<LoaderCircle size={16} class="spin" />
-            {:else if isVideo(r.source)}<FileVideo size={16} />
-            {:else}<FileAudio size={16} />{/if}
-          </div>
-          <div class="main">
-            <div class="row">
-              <b class="title">{r.title}</b>
-              {#if r.starred}<Star size={12} fill="currentColor" class="star" />{/if}
-            </div>
-            {#if st.st === "processing" || st.st === "queued"}
-              <div class="row prog">
-                <span class="faint small">{st.st === "queued" ? "Waiting in queue" : (STAGES[st.stage] ?? "Working")}{st.pct > 0 ? ` · ${Math.round(st.pct * 100)}%` : ""}</span>
-                <div class="progress spacer" class:indeterminate={st.pct <= 0}><div style:width="{st.pct * 100}%"></div></div>
-              </div>
-            {:else if st.st === "error"}
-              <span class="err small">{st.error ?? "Failed"}</span>
-            {:else}
-              <span class="preview faint small">{r.preview || "No speech detected"}</span>
-            {/if}
-          </div>
-          <div class="side faint small">
-            <span>{relDate(r.created_at)}</span>
-            {#if r.duration_ms}<span>{duration(r.duration_ms)}</span>{/if}
-          </div>
-          {#if st.st === "processing" || st.st === "queued"}
-            <button
-              class="btn icon sm ghost"
-              title="Cancel"
-              onclick={(e) => {
-                e.preventDefault();
-                api.cancelJob(r.id);
-              }}><X size={14} /></button
-            >
-          {/if}
-        </a>
-      {:else}
-        <div class="empty">
-          <h3>{query ? "No matches" : "No files yet"}</h3>
-          <p>{query ? "Try a different search." : "Your transcripts will be listed here."}</p>
+  <section class="mb-10 overflow-hidden rounded-2xl border bg-card shadow-xs">
+    <div class="p-2">
+      <button
+        class="group flex w-full flex-col items-center gap-2 rounded-xl border border-dashed border-input bg-muted/40 px-6 py-8 text-center transition-colors hover:border-ember/50 hover:bg-ember-soft/60"
+        onclick={pick}
+      >
+        <div class="mb-1 grid size-11 place-items-center rounded-xl bg-background text-ember-text shadow-sm ring-1 ring-border transition-transform group-hover:-translate-y-0.5">
+          <Upload class="size-5" strokeWidth={1.8} />
         </div>
-      {/each}
+        <span class="text-sm font-medium">Drop files anywhere, or click to choose</span>
+        <span class="text-xs text-muted-foreground">
+          MP3, M4A, WAV, FLAC, MP4, MOV and more{app.info && !app.info.ffmpeg ? " · install ffmpeg for more formats" : ""}
+        </span>
+      </button>
+      <form class="mt-2" onsubmit={addUrl}>
+        <InputGroup.Root class="h-10 rounded-xl bg-background">
+          <InputGroup.Addon><Link /></InputGroup.Addon>
+          <InputGroup.Input
+            class="selectable"
+            placeholder={app.info?.ytdlp ? "Paste a YouTube, podcast or media link" : "Paste a direct link to an audio or video file"}
+            bind:value={url}
+          />
+          <InputGroup.Addon align="inline-end">
+            <InputGroup.Button type="submit" variant="default" size="sm" class="h-7 px-3" disabled={!url.trim() || adding}>
+              {#if adding}<LoaderCircle class="animate-spin" /> Adding…{:else}Transcribe{/if}
+            </InputGroup.Button>
+          </InputGroup.Addon>
+        </InputGroup.Root>
+      </form>
     </div>
-  </div>
-</div>
+    <div class="flex flex-wrap items-center gap-x-6 gap-y-3 border-t bg-muted/30 px-4 py-3">
+      <div class="flex items-center gap-2">
+        <span class="text-xs text-muted-foreground">Model</span>
+        <Select.Root
+          type="single"
+          bind:value={
+            () => s.files.stt_profile,
+            (v) => {
+              s.files.stt_profile = v;
+              app.save();
+            }
+          }
+        >
+          <Select.Trigger size="sm" class="w-48 bg-background"><span class="truncate">{app.sttName(s.files.stt_profile)}</span></Select.Trigger>
+          <Select.Content>
+            {#each s.stt_profiles as p}<Select.Item value={p.id} label={app.sttName(p.id)} />{/each}
+          </Select.Content>
+        </Select.Root>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="text-xs text-muted-foreground">Language</span>
+        <Select.Root
+          type="single"
+          bind:value={
+            () => s.files.language ?? AUTO,
+            (v) => {
+              s.files.language = v === AUTO ? null : v;
+              app.save();
+            }
+          }
+        >
+          <Select.Trigger size="sm" class="w-40 bg-background">{languageName(s.files.language)}</Select.Trigger>
+          <Select.Content class="max-h-72">
+            <Select.Item value={AUTO} label="Auto-detect" />
+            <Select.Separator />
+            {#each LANGUAGES as [c, n]}<Select.Item value={c} label={n} />{/each}
+          </Select.Content>
+        </Select.Root>
+      </div>
+      <div class="flex items-center gap-2">
+        <Checkbox id="f-diarize" bind:checked={s.files.diarize} onCheckedChange={() => app.save()} />
+        <Label for="f-diarize" class="text-xs font-normal">Identify speakers <span class="text-muted-foreground">(cloud providers)</span></Label>
+      </div>
+      {#if s.llm_profiles.length}
+        <div class="flex items-center gap-2">
+          <Checkbox id="f-summarize" bind:checked={s.files.auto_summarize} onCheckedChange={() => app.save()} />
+          <Label for="f-summarize" class="text-xs font-normal">Summarize automatically</Label>
+        </div>
+      {/if}
+    </div>
+  </section>
 
-<style>
-  .import {
-    padding: 8px;
-    border-radius: var(--r-lg);
-    margin-bottom: 26px;
-  }
-  .drop {
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-    padding: 26px;
-    border-radius: var(--r);
-    border: 1.5px dashed var(--line-2);
-    background: var(--surface-2);
-    color: var(--text);
-    font: inherit;
-    cursor: pointer;
-    transition: border-color 0.15s;
-  }
-  .drop:hover {
-    border-color: var(--ember);
-  }
-  .drop :global(svg) {
-    color: var(--ember-text);
-  }
-  .url {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin: 8px 0 0;
-    padding: 4px 4px 4px 12px;
-    border-radius: var(--r-sm);
-    background: var(--surface-2);
-  }
-  .url :global(svg) {
-    color: var(--text-3);
-  }
-  .url input {
-    flex: 1;
-    height: 30px;
-    border: 0;
-    outline: 0;
-    background: none;
-    color: var(--text);
-    font: inherit;
-  }
-  .opts {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 6px 18px;
-    padding: 12px 8px 4px;
-  }
-  .opts label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--text-2);
-    font-size: 12.5px;
-  }
-  .opts .select {
-    width: 190px;
-    height: 28px;
-    font-size: 12.5px;
-  }
-  .chk input {
-    accent-color: var(--ember);
-  }
-  .tools {
-    margin-bottom: 6px;
-  }
-  .item {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    padding: 12px 10px;
-    margin: 0 -10px;
-    border-radius: var(--r);
-    color: inherit;
-  }
-  .item:hover {
-    background: var(--surface);
-  }
-  .ic {
-    display: grid;
-    place-items: center;
-    width: 36px;
-    height: 36px;
-    border-radius: 10px;
-    background: var(--surface-2);
-    color: var(--text-2);
-    flex: none;
-  }
-  .ic.busy {
-    color: var(--ember-text);
-    background: var(--ember-soft);
-  }
-  .main {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-  .title {
-    font-weight: 550;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .main :global(.star) {
-    color: var(--amber);
-    flex: none;
-  }
-  .preview {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .prog {
-    gap: 12px;
-  }
-  .prog .progress {
-    max-width: 260px;
-  }
-  .err {
-    color: var(--ember-text);
-  }
-  .side {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    flex: none;
-  }
-</style>
+  <div class="mb-3 flex items-center justify-between gap-4">
+    <h2 class="heading text-xl">Library</h2>
+    <InputGroup.Root class="w-72">
+      <InputGroup.Addon><Search /></InputGroup.Addon>
+      <InputGroup.Input placeholder="Search titles and transcripts" bind:value={query} />
+    </InputGroup.Root>
+  </div>
+
+  {#if items.length}
+    <Item.Group class="gap-0 overflow-hidden rounded-xl border bg-card">
+      {#each items as r, i (r.id)}
+        {@const st = status(r)}
+        {@const busy = st.st === "processing" || st.st === "queued"}
+        <Item.Root class="rounded-none border-0 px-4 py-3 {i ? 'border-t border-border' : ''} hover:bg-muted/50">
+          {#snippet child({ props })}
+            <a href={`/files/${r.id}`} {...props}>
+              <Item.Media
+                class="size-9 rounded-lg {busy ? 'bg-ember-soft text-ember-text' : st.st === 'error' ? 'bg-destructive/10 text-destructive' : 'bg-muted text-muted-foreground'}"
+              >
+                {#if st.st === "error"}<CircleAlert class="size-4" />
+                {:else if st.st === "processing"}<LoaderCircle class="size-4 animate-spin" />
+                {:else if isVideo(r.source)}<FileVideo class="size-4" />
+                {:else}<FileAudio class="size-4" />{/if}
+              </Item.Media>
+              <Item.Content class="min-w-0 gap-0.5">
+                <Item.Title class="w-full">
+                  <span class="truncate">{r.title}</span>
+                  {#if r.starred}<Star class="size-3 shrink-0 text-amber" fill="currentColor" />{/if}
+                </Item.Title>
+                {#if busy}
+                  <div class="flex items-center gap-3">
+                    <span class="shrink-0 text-xs text-muted-foreground">
+                      {st.st === "queued" ? "Waiting in queue" : (STAGES[st.stage] ?? "Working")}{st.pct > 0 ? ` · ${Math.round(st.pct * 100)}%` : ""}
+                    </span>
+                    {#if st.pct > 0}
+                      <Progress value={st.pct * 100} class="max-w-64" />
+                    {:else}
+                      <div class="relative h-1 w-full max-w-64 overflow-hidden rounded-full bg-muted">
+                        <div class="h-full w-1/3 animate-indeterminate rounded-full bg-primary"></div>
+                      </div>
+                    {/if}
+                  </div>
+                {:else if st.st === "error"}
+                  <span class="truncate text-xs text-destructive">{st.error ?? "Failed"}</span>
+                {:else}
+                  <span class="truncate text-xs text-muted-foreground">{r.preview || "No speech detected"}</span>
+                {/if}
+              </Item.Content>
+              <div class="flex shrink-0 flex-col items-end text-xs text-muted-foreground tabular-nums">
+                <span>{relDate(r.created_at)}</span>
+                {#if r.duration_ms}<span>{duration(r.duration_ms)}</span>{/if}
+              </div>
+              {#if busy}
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  class="text-muted-foreground"
+                  title="Cancel"
+                  onclick={(e) => {
+                    e.preventDefault();
+                    api.cancelJob(r.id);
+                  }}><X /></Button
+                >
+              {/if}
+            </a>
+          {/snippet}
+        </Item.Root>
+      {/each}
+    </Item.Group>
+  {:else}
+    <Empty.Root class="rounded-xl border border-dashed py-14">
+      <Empty.Header>
+        <Empty.Media variant="icon">{#if query}<Search />{:else}<FolderOpen />{/if}</Empty.Media>
+        <Empty.Title>{query ? "No matches" : "No files yet"}</Empty.Title>
+        <Empty.Description>{query ? "Try a different search." : "Your transcripts will be listed here."}</Empty.Description>
+      </Empty.Header>
+    </Empty.Root>
+  {/if}
+</Page>

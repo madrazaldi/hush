@@ -2,6 +2,11 @@
   import { tick } from "svelte";
   import type { Segment } from "#lib/types.js";
   import { clock } from "#lib/format.js";
+  import * as Popover from "#lib/components/ui/popover/index.js";
+  import { Input } from "#lib/components/ui/input/index.js";
+  import { Textarea } from "#lib/components/ui/textarea/index.js";
+  import { Button } from "#lib/components/ui/button/index.js";
+  import { ArrowDownToLine } from "@lucide/svelte";
 
   let {
     segments,
@@ -103,7 +108,7 @@
     if (!editable || !onedit) return;
     editing = i;
     draft = segments[i].text;
-    tick().then(() => root?.querySelector<HTMLTextAreaElement>(".edit")?.focus());
+    tick().then(() => root?.querySelector<HTMLTextAreaElement>("textarea")?.focus());
   }
   function commit() {
     if (editing === null) return;
@@ -128,39 +133,56 @@
   }
 </script>
 
-<svelte:window onclick={(e) => menu && !(e.target as HTMLElement).closest(".spk-wrap") && (menu = null)} />
-
-<div class="transcript" bind:this={root} onwheel={() => (follow = false)}>
+<div class="flex flex-col" bind:this={root} onwheel={() => (follow = false)}>
   {#each segments as seg, i (i)}
     {@const sp = seg.speaker}
     {@const first = i === 0 || segments[i - 1].speaker !== sp}
-    <div class="seg" class:first class:active={i === active} data-i={i}>
+    <div class="group/seg flex gap-3 py-0.5 {first && i > 0 ? 'mt-4' : ''}" data-i={i}>
       {#if showTimes}
-        <button class="time mono" onclick={() => { follow = true; onseek?.(seg.start_ms); }}>{clock(seg.start_ms)}</button>
+        <button
+          class="mt-[3px] h-[22px] w-13 shrink-0 rounded-md text-right font-mono text-[11px] text-muted-foreground/70 tabular-nums transition-colors hover:bg-muted hover:text-ember-text {i === active ? 'text-ember-text' : ''}"
+          onclick={() => {
+            follow = true;
+            onseek?.(seg.start_ms);
+          }}>{clock(seg.start_ms)}</button
+        >
       {/if}
-      <div class="body">
+      <div class="min-w-0 flex-1">
         {#if sp && first}
-          <div class="spk-wrap">
-            <button class="spk" style:--c={color(sp)} onclick={() => openMenu(i, sp)}>{label(sp)}</button>
+          <Popover.Root bind:open={() => menu?.index === i, (v) => (v ? openMenu(i, sp) : (menu = null))}>
+            <Popover.Trigger
+              class="mb-0.5 inline-flex items-center gap-1.5 rounded px-0 text-xs font-semibold tracking-wide"
+              style="color: {color(sp)}"
+            >
+              <span class="size-1.5 rounded-full" style:background={color(sp)}></span>{label(sp)}
+            </Popover.Trigger>
             {#if menu && menu.index === i}
-              <div class="menu card">
-                <form onsubmit={rename}>
-                  <span class="eyebrow">Rename “{menu.key}”</span>
-                  <input class="input" bind:value={renameDraft} />
+              <Popover.Content align="start" class="w-64 gap-2">
+                <form class="flex flex-col gap-1.5" onsubmit={rename}>
+                  <span class="text-xs font-medium text-muted-foreground">Rename “{menu.key}”</span>
+                  <Input bind:value={renameDraft} class="h-8" />
                 </form>
                 {#if onreassign && keys.length > 1}
-                  <span class="eyebrow">This line is actually</span>
-                  {#each keys.filter((k) => k !== sp) as k}
-                    <button onclick={() => { onreassign?.(i, k); menu = null; }}><i style:background={color(k)}></i>{label(k)}</button>
-                  {/each}
+                  <span class="mt-1 text-xs font-medium text-muted-foreground">This line is actually</span>
+                  <div class="-mx-1 flex flex-col">
+                    {#each keys.filter((k) => k !== sp) as k}
+                      <button
+                        class="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent"
+                        onclick={() => {
+                          onreassign?.(i, k);
+                          menu = null;
+                        }}><span class="size-2 rounded-full" style:background={color(k)}></span>{label(k)}</button
+                      >
+                    {/each}
+                  </div>
                 {/if}
-              </div>
+              </Popover.Content>
             {/if}
-          </div>
+          </Popover.Root>
         {/if}
         {#if editing === i}
-          <textarea
-            class="edit textarea"
+          <Textarea
+            class="text-[14.5px] leading-relaxed"
             bind:value={draft}
             rows={Math.max(2, Math.ceil(draft.length / 90))}
             onblur={commit}
@@ -170,11 +192,17 @@
                 commit();
               } else if (e.key === "Escape") editing = null;
             }}
-          ></textarea>
+          />
         {:else}
           <!-- svelte-ignore a11y_click_events_have_key_events -->
           <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-          <p class="text selectable" onclick={() => window.getSelection()?.isCollapsed && onseek?.(seg.start_ms)} ondblclick={() => startEdit(i)}>
+          <p
+            class="text selectable -mx-1.5 cursor-text rounded-md px-1.5 py-px text-[14.5px] leading-[1.7] transition-colors duration-200 {i === active
+              ? 'bg-ember-soft'
+              : 'hover:bg-muted/70'}"
+            onclick={() => window.getSelection()?.isCollapsed && onseek?.(seg.start_ms)}
+            ondblclick={() => startEdit(i)}
+          >
             {@html highlight(seg.text)}
           </p>
         {/if}
@@ -184,140 +212,16 @@
 </div>
 
 {#if !follow && active >= 0}
-  <button class="follow btn sm" onclick={() => (follow = true)}>Follow playback</button>
+  <Button variant="outline" size="sm" class="sticky bottom-2 mx-auto mt-2 flex self-center shadow-md" onclick={() => (follow = true)}>
+    <ArrowDownToLine /> Follow playback
+  </Button>
 {/if}
 
 <style>
-  .transcript {
-    display: flex;
-    flex-direction: column;
-  }
-  .seg {
-    display: flex;
-    gap: 14px;
-    padding: 3px 0;
-  }
-  .seg.first {
-    margin-top: 14px;
-  }
-  .seg:first-child {
-    margin-top: 0;
-  }
-  .time {
-    flex: none;
-    width: 52px;
-    height: 22px;
-    margin-top: 1px;
-    border: 0;
-    border-radius: 5px;
-    background: none;
-    color: var(--text-3);
-    font-size: 11px;
-    text-align: right;
-    cursor: pointer;
-  }
-  .time:hover {
-    color: var(--ember-text);
-    background: var(--surface-2);
-  }
-  .body {
-    flex: 1;
-    min-width: 0;
-  }
-  .text {
-    padding: 1px 6px;
-    margin: 0 -6px;
-    border-radius: 6px;
-    font-size: 14.5px;
-    line-height: 1.65;
-    transition: background 0.2s;
-    cursor: text;
-  }
-  .text:hover {
-    background: var(--surface-2);
-  }
-  .active .text {
-    background: var(--ember-soft);
-  }
   .text :global(mark) {
     background: var(--hl);
     color: inherit;
     border-radius: 3px;
     padding: 0 1px;
-  }
-  .edit {
-    font-size: 14.5px;
-  }
-  .spk-wrap {
-    position: relative;
-  }
-  .spk {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    margin-bottom: 2px;
-    padding: 0;
-    border: 0;
-    background: none;
-    color: var(--c);
-    font: inherit;
-    font-size: 12px;
-    font-weight: 650;
-    letter-spacing: 0.02em;
-    cursor: pointer;
-  }
-  .spk::before {
-    content: "";
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--c);
-  }
-  .menu {
-    position: absolute;
-    z-index: 30;
-    top: 22px;
-    left: 0;
-    width: 240px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: 10px;
-    border-radius: var(--r);
-    box-shadow: var(--shadow-pop);
-  }
-  .menu form {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .menu button {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 5px 6px;
-    border: 0;
-    border-radius: 6px;
-    background: none;
-    color: inherit;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-  }
-  .menu button:hover {
-    background: var(--surface-2);
-  }
-  .menu i {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-  }
-  .follow {
-    position: sticky;
-    bottom: 8px;
-    align-self: center;
-    margin: 8px auto 0;
-    display: flex;
-    box-shadow: var(--shadow-pop);
   }
 </style>

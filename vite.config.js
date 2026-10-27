@@ -1,10 +1,12 @@
 import { defineConfig } from "vite";
 import { sveltekit } from "@sveltejs/kit/vite";
 import adapter from "@sveltejs/adapter-static";
+import tailwindcss from "@tailwindcss/vite";
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
+    tailwindcss(),
     sveltekit({
       // The app is a client-only SPA shown in an Electrobun window: adapter-static with a fallback to
       // index.html (https://svelte.dev/docs/kit/single-page-apps). `dist/` is copied into the app bundle

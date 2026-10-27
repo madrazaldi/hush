@@ -1,6 +1,10 @@
 <script lang="ts">
   import { api, errorText } from "#lib/api.js";
   import Keys from "./Keys.svelte";
+  import { Button } from "#lib/components/ui/button/index.js";
+  import * as DropdownMenu from "#lib/components/ui/dropdown-menu/index.js";
+  import { cn } from "#lib/utils.js";
+  import { ChevronDown, CircleSlash, Keyboard } from "@lucide/svelte";
 
   let {
     value = $bindable(""),
@@ -125,82 +129,45 @@
 
 <svelte:window onkeydowncapture={down} onkeyupcapture={up} />
 
-<div class="hk">
-  <button type="button" class="field" class:rec={recording} onclick={() => (recording ? (recording = false) : start())}>
-    {#if recording}
-      {#if preview}<Keys combo={preview} />{:else}<span class="faint">Press keys… (esc to cancel)</span>{/if}
-    {:else if value}
-      <Keys combo={value} />
-    {:else}
-      <span class="faint">Not set</span>
-    {/if}
-  </button>
-  <button type="button" class="btn sm ghost" onclick={() => (open = !open)}>Presets</button>
-  {#if open}
-    <div class="menu card">
-      {#each presets as p}
-        <button type="button" onclick={() => commit(p)}><Keys combo={p} /></button>
-      {/each}
-      {#if allowEmpty}
-        <button type="button" onclick={() => { value = ""; open = false; onchange?.(""); }}><span class="muted">Disable</span></button>
+<div class="flex flex-col items-end gap-1">
+  <div class="flex items-center gap-1.5">
+    <button
+      type="button"
+      class={cn(
+        "flex h-8 min-w-40 items-center justify-center gap-2 rounded-lg border border-input bg-background px-2.5 text-sm transition-all outline-none hover:bg-muted focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30 dark:hover:bg-input/50",
+        recording && "border-ember ring-3 ring-ember/25 hover:bg-background dark:hover:bg-input/30",
+      )}
+      onclick={() => (recording ? (recording = false) : start())}
+    >
+      {#if recording}
+        {#if preview}<Keys combo={preview} />{:else}<span class="flex items-center gap-1.5 text-[13px] text-ember-text"><span class="size-1.5 rounded-full bg-ember animate-pulse-ring"></span>Press keys… <span class="text-muted-foreground">esc to cancel</span></span>{/if}
+      {:else if value}
+        <Keys combo={value} />
+      {:else}
+        <span class="flex items-center gap-1.5 text-[13px] text-muted-foreground"><Keyboard class="size-3.5" /> Not set</span>
       {/if}
-    </div>
-  {/if}
+    </button>
+    <DropdownMenu.Root bind:open>
+      <DropdownMenu.Trigger>
+        {#snippet child({ props })}
+          <Button {...props} variant="ghost" size="sm" class="text-muted-foreground">Presets <ChevronDown /></Button>
+        {/snippet}
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Content align="end" class="w-auto min-w-44">
+        {#each presets as p}
+          <DropdownMenu.Item onSelect={() => commit(p)} class="justify-between gap-6">
+            <Keys combo={p} />
+            {#if p === value}<span class="size-1.5 rounded-full bg-ember"></span>{/if}
+          </DropdownMenu.Item>
+        {/each}
+        {#if allowEmpty}
+          <DropdownMenu.Separator />
+          <DropdownMenu.Item onSelect={() => { value = ""; open = false; onchange?.(""); }} class="text-muted-foreground">
+            <CircleSlash /> Disable
+          </DropdownMenu.Item>
+        {/if}
+      </DropdownMenu.Content>
+    </DropdownMenu.Root>
+  </div>
+  {#if error}<p class="max-w-72 text-right text-xs text-destructive">{error}</p>{/if}
 </div>
-{#if error}<div class="err small">{error}</div>{/if}
-
-<style>
-  .hk {
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .field {
-    min-width: 150px;
-    height: 32px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0 10px;
-    border-radius: var(--r-sm);
-    border: 1px solid var(--line-2);
-    background: var(--surface);
-    color: var(--text);
-    font: inherit;
-    cursor: pointer;
-  }
-  .field.rec {
-    border-color: var(--ember);
-    box-shadow: 0 0 0 3px var(--ember-soft);
-  }
-  .menu {
-    position: absolute;
-    top: 38px;
-    right: 0;
-    z-index: 20;
-    display: flex;
-    flex-direction: column;
-    padding: 5px;
-    border-radius: var(--r);
-    box-shadow: var(--shadow-pop);
-    min-width: 160px;
-  }
-  .menu button {
-    display: flex;
-    padding: 6px 8px;
-    border: 0;
-    border-radius: 6px;
-    background: none;
-    color: inherit;
-    font: inherit;
-    cursor: pointer;
-  }
-  .menu button:hover {
-    background: var(--surface-2);
-  }
-  .err {
-    color: var(--ember-text);
-    margin-top: 4px;
-  }
-</style>

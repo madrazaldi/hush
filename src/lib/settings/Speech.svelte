@@ -7,9 +7,23 @@
   import type { ModelStatus, SttProfile } from "#lib/types.js";
   import Section from "#lib/components/Section.svelte";
   import Field from "#lib/components/Field.svelte";
-  import { Check, Download, Trash2, X, Plus, Cloud, Cpu, Globe, Zap, KeyRound, LoaderCircle, ExternalLink } from "@lucide/svelte";
+  import { Button } from "#lib/components/ui/button/index.js";
+  import { Badge } from "#lib/components/ui/badge/index.js";
+  import { Input } from "#lib/components/ui/input/index.js";
+  import { Label } from "#lib/components/ui/label/index.js";
+  import { Progress } from "#lib/components/ui/progress/index.js";
+  import { Spinner } from "#lib/components/ui/spinner/index.js";
+  import * as DropdownMenu from "#lib/components/ui/dropdown-menu/index.js";
+  import Choice from "./Choice.svelte";
+  import { cn } from "#lib/utils.js";
+  import { Check, Download, Trash2, X, Plus, Cloud, Cpu, Globe, Zap, KeyRound, ExternalLink, Target, CircleCheck, CircleX } from "@lucide/svelte";
 
   const s = $derived(app.settings!);
+  const FEATURES = [
+    ["Dictation", "dictation"],
+    ["Meetings", "meetings"],
+    ["Files", "files"],
+  ] as const;
   let showAll = $state(false);
   let testing = $state<Record<string, boolean>>({});
   let results = $state<Record<string, { ok: boolean; text: string }>>({});
@@ -94,280 +108,146 @@
 </script>
 
 <Section title="Use for" description="Pick a speech engine per feature. Dictation favors speed; files and meetings favor accuracy.">
-  <Field label="Dictation">
-    <select class="select" bind:value={s.dictation.stt_profile} onchange={() => app.save()}>
-      {#each s.stt_profiles as p}<option value={p.id}>{app.sttName(p.id)}</option>{/each}
-    </select>
-  </Field>
-  <Field label="Meetings">
-    <select class="select" bind:value={s.meetings.stt_profile} onchange={() => app.save()}>
-      {#each s.stt_profiles as p}<option value={p.id}>{app.sttName(p.id)}</option>{/each}
-    </select>
-  </Field>
-  <Field label="Files">
-    <select class="select" bind:value={s.files.stt_profile} onchange={() => app.save()}>
-      {#each s.stt_profiles as p}<option value={p.id}>{app.sttName(p.id)}</option>{/each}
-    </select>
-  </Field>
+  {#each FEATURES as [label, key]}
+    <Field {label}>
+      <Choice bind:value={s[key].stt_profile} onchange={() => app.save()} options={s.stt_profiles.map((p) => [p.id, app.sttName(p.id)] as const)} />
+    </Field>
+  {/each}
 </Section>
 
-<div class="sechead">
-  <div>
-    <h3>On-device models</h3>
-    <p class="muted small">Run privately on your Mac's GPU. Selected: <b>{app.sttName("local")}</b></p>
-  </div>
-  <button class="btn sm ghost" onclick={() => (showAll = !showAll)}>{showAll ? "Show recommended" : `Show all ${models.length}`}</button>
-</div>
+{#snippet meterDots(Icon: typeof Zap, title: string, dots: boolean[])}
+  <span class="inline-flex items-center gap-1" {title}>
+    <Icon class="mr-0.5 size-3" />
+    {#each dots as on}<i class={cn("size-[5px] rounded-full", on ? "bg-ember" : "bg-foreground/15")}></i>{/each}
+  </span>
+{/snippet}
 
-<div class="models">
-  {#each shown as m (m.id)}
-    <div class="model card" class:sel={local?.model === m.id}>
-      <div class="row top">
-        <b>{m.name}</b>
-        {#if m.id === "parakeet-tdt-0.6b-v3"}<span class="chip ember">Best overall</span>{/if}
-        {#if m.streaming}<span class="chip">Streaming</span>{/if}
-        <span class="spacer"></span>
-        <span class="faint small">{bytes(m.size_bytes)}</span>
-      </div>
-      <p class="muted small desc">{m.description}</p>
-      <div class="row specs small">
-        <span title="Languages"><Globe size={12} /> {m.languages.length > 1 ? `${m.languages.length} languages` : "English"}</span>
-        <span class="meter" title="Speed"><Zap size={12} />{#each meter(m.speed, "speed") as on}<i class:on></i>{/each}</span>
-        <span class="meter" title="Accuracy"><Check size={12} />{#each meter(m.accuracy, "accuracy") as on}<i class:on></i>{/each}</span>
-        {#if m.translate}<span class="faint">Translate</span>{/if}
-      </div>
-      <div class="row acts">
-        {#if m.downloading != null}
-          <div class="progress spacer"><div style:width="{m.downloading * 100}%"></div></div>
-          <span class="faint small mono">{Math.round(m.downloading * 100)}%</span>
-          <button class="btn icon sm ghost" title="Cancel" onclick={() => api.cancelModelDownload(m.id)}><X size={13} /></button>
-        {:else if m.downloaded}
-          {#if local?.model === m.id}
-            <span class="chip sage"><Check size={12} /> In use</span>
-          {:else}
-            <button class="btn sm" onclick={() => use(m)}>Use</button>
-          {/if}
-          <span class="spacer"></span>
-          <button class="btn icon sm ghost" title="Delete" onclick={() => del(m)}><Trash2 size={13} /></button>
-        {:else}
-          <button class="btn sm" onclick={() => download(m)}><Download size={13} /> Download</button>
-          <span class="spacer"></span>
-          <span class="faint small">{m.license}</span>
-        {/if}
-      </div>
-    </div>
-  {/each}
-</div>
-
-<div class="sechead">
-  <div>
-    <h3>Providers</h3>
-    <p class="muted small">Cloud transcription with your own API keys. Audio is sent to the provider you choose.</p>
-  </div>
-  <div class="addwrap">
-    <button class="btn sm" onclick={() => (adding = !adding)}><Plus size={13} /> Add</button>
-    {#if adding}
-      <div class="menu card">
-        {#each STT_PRESETS as pr}
-          <button onclick={() => addPreset(pr)}><Cloud size={13} /> {pr.name}</button>
-        {/each}
-        <div class="sep"></div>
-        <button onclick={addLocal}><Cpu size={13} /> Another on-device model</button>
-      </div>
-    {/if}
-  </div>
-</div>
-
-{#each [...extraLocal, ...cloud] as p (p.id)}
-  <div class="prov card">
-    <div class="row">
-      <input class="input name" bind:value={p.name} oninput={() => app.save()} />
-      <span class="chip">{STT_KINDS[p.kind].label}</span>
-      {#each uses[p.id] ?? [] as u}<span class="chip ember">{u}</span>{/each}
-      <span class="spacer"></span>
-      <button class="btn icon sm ghost" title="Remove" onclick={() => remove(p)}><Trash2 size={13} /></button>
-    </div>
-    {#if p.kind === "local"}
-      <label>
-        <span>Model</span>
-        <select class="select" bind:value={p.model} onchange={() => app.save()}>
-          {#each models.filter((m) => m.downloaded) as m}<option value={m.id}>{m.name}</option>{/each}
-        </select>
-      </label>
-    {:else}
-      <div class="grid">
-        <label>
-          <span>API key</span>
-          <div class="row">
-            <input class="input mono" type="password" placeholder="Paste key" bind:value={p.api_key} oninput={() => app.save()} />
-            {#if STT_KINDS[p.kind].keyUrl}
-              <button class="btn icon sm ghost" title="Get a key" onclick={() => openUrl(STT_KINDS[p.kind].keyUrl!)}><KeyRound size={13} /></button>
-            {/if}
+<Section title="On-device models" description={`Run privately on your Mac's GPU. Selected: ${app.sttName("local")}`} flush>
+  {#snippet actions()}
+    <Button variant="ghost" size="sm" class="text-muted-foreground" onclick={() => (showAll = !showAll)}>{showAll ? "Show recommended" : `Show all ${models.length}`}</Button>
+  {/snippet}
+  <div class="grid grid-cols-2 gap-3">
+    {#each shown as m (m.id)}
+      {@const inUse = local?.model === m.id}
+      <div class={cn("flex flex-col gap-2.5 rounded-xl border bg-card p-4 shadow-xs transition-shadow", inUse && "border-ember/50 ring-3 ring-ember/10")}>
+        <div class="flex items-start gap-2">
+          <div class="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+            <span class="mr-0.5 text-sm font-semibold">{m.name}</span>
+            {#if m.id === "parakeet-tdt-0.6b-v3"}<Badge class="bg-ember-soft text-ember-text">Best overall</Badge>{/if}
+            {#if m.streaming}<Badge variant="secondary">Streaming</Badge>{/if}
           </div>
-        </label>
-        <label><span>Model</span><input class="input mono" bind:value={p.model} oninput={() => app.save()} placeholder={STT_KINDS[p.kind].model} /></label>
-        <label class="wide">
-          <span>Base URL</span>
-          <input class="input mono" bind:value={p.base_url} oninput={() => app.save()} placeholder={STT_KINDS[p.kind].baseUrl} />
-        </label>
+          <span class="shrink-0 pt-px text-xs text-muted-foreground tabular-nums">{bytes(m.size_bytes)}</span>
+        </div>
+        <p class="flex-1 text-[13px] leading-snug text-muted-foreground">{m.description}</p>
+        <div class="flex items-center gap-3.5 text-xs text-muted-foreground">
+          <span class="inline-flex items-center gap-1" title="Languages"><Globe class="size-3" /> {m.languages.length > 1 ? `${m.languages.length} languages` : "English"}</span>
+          {@render meterDots(Zap, "Speed", meter(m.speed, "speed"))}
+          {@render meterDots(Target, "Accuracy", meter(m.accuracy, "accuracy"))}
+          {#if m.translate}<span>Translate</span>{/if}
+        </div>
+        <div class="mt-1 flex min-h-7 items-center gap-2 border-t pt-3">
+          {#if m.downloading != null}
+            <Progress value={m.downloading * 100} class="h-1.5 flex-1" />
+            <span class="w-9 text-right font-mono text-xs text-muted-foreground tabular-nums">{Math.round(m.downloading * 100)}%</span>
+            <Button variant="ghost" size="icon-xs" title="Cancel" onclick={() => api.cancelModelDownload(m.id)}><X /></Button>
+          {:else if m.downloaded}
+            {#if inUse}
+              <Badge class="bg-sage-soft text-sage"><Check /> In use</Badge>
+            {:else}
+              <Button variant="outline" size="xs" onclick={() => use(m)}>Use this model</Button>
+            {/if}
+            <span class="flex-1"></span>
+            <Button variant="ghost" size="icon-xs" class="text-muted-foreground hover:text-destructive" title="Delete" onclick={() => del(m)}><Trash2 /></Button>
+          {:else}
+            <Button variant="outline" size="xs" onclick={() => download(m)}><Download /> Download</Button>
+            <span class="flex-1"></span>
+            <span class="text-xs text-muted-foreground">{m.license}</span>
+          {/if}
+        </div>
       </div>
-    {/if}
-    <div class="row">
-      <button class="btn sm" onclick={() => test(p)} disabled={testing[p.id]}>
-        {#if testing[p.id]}<LoaderCircle size={13} class="spin" />{/if} Test
-      </button>
-      {#if results[p.id]}
-        <span class="small selectable" class:ok={results[p.id].ok} class:bad={!results[p.id].ok}>{results[p.id].text}</span>
-      {/if}
-    </div>
+    {/each}
   </div>
-{:else}
-  <div class="none faint small">
-    No cloud providers. Add OpenAI, Groq, xAI, Muse, Deepgram, ElevenLabs or AssemblyAI for speaker labels and long files.
-    <button class="link" onclick={() => openUrl("https://platform.openai.com/docs/guides/speech-to-text")}>Learn more <ExternalLink size={11} /></button>
-  </div>
-{/each}
+</Section>
 
-<style>
-  .sechead {
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: 12px;
-    margin: 6px 4px 10px;
-  }
-  .sechead h3 {
-    font-family: var(--sans);
-    font-size: 13.5px;
-    font-weight: 650;
-  }
-  .models {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    margin-bottom: 30px;
-  }
-  .model {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 14px;
-    border-radius: var(--r);
-  }
-  .model.sel {
-    border-color: color-mix(in srgb, var(--ember) 55%, transparent);
-  }
-  .top {
-    gap: 6px;
-  }
-  .desc {
-    flex: 1;
-    line-height: 1.45;
-  }
-  .specs {
-    gap: 12px;
-    color: var(--text-3);
-  }
-  .specs span {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-  }
-  .meter i {
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: var(--surface-3);
-  }
-  .meter i.on {
-    background: var(--ember);
-  }
-  .acts {
-    min-height: 26px;
-  }
-  .addwrap {
-    position: relative;
-  }
-  .menu {
-    position: absolute;
-    right: 0;
-    top: 32px;
-    z-index: 30;
-    width: 230px;
-    padding: 5px;
-    border-radius: var(--r);
-    box-shadow: var(--shadow-pop);
-    display: flex;
-    flex-direction: column;
-  }
-  .menu button {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    padding: 7px 8px;
-    border: 0;
-    border-radius: 6px;
-    background: none;
-    color: inherit;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-  }
-  .menu button:hover {
-    background: var(--surface-2);
-  }
-  .sep {
-    height: 1px;
-    margin: 4px;
-    background: var(--line);
-  }
-  .prov {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    padding: 14px 16px;
-    margin-bottom: 10px;
-    border-radius: var(--r);
-  }
-  .prov .name {
-    width: 220px;
-    font-weight: 600;
-  }
-  .grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-  }
-  .grid .wide {
-    grid-column: span 2;
-  }
-  label {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-  }
-  label > span {
-    font-size: 11.5px;
-    color: var(--text-3);
-    font-weight: 600;
-  }
-  .ok {
-    color: var(--sage);
-  }
-  .bad {
-    color: var(--ember-text);
-  }
-  .none {
-    padding: 14px 4px;
-  }
-  .link {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    border: 0;
-    background: none;
-    color: var(--ember-text);
-    font: inherit;
-    cursor: pointer;
-  }
-</style>
+<Section title="Providers" description="Cloud transcription with your own API keys. Audio is sent to the provider you choose." flush>
+  {#snippet actions()}
+    <DropdownMenu.Root bind:open={adding}>
+      <DropdownMenu.Trigger>
+        {#snippet child({ props })}<Button {...props} variant="outline" size="sm"><Plus /> Add provider</Button>{/snippet}
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Content align="end" class="w-60">
+        <DropdownMenu.Label class="text-xs text-muted-foreground">Cloud</DropdownMenu.Label>
+        {#each STT_PRESETS as pr}
+          <DropdownMenu.Item onSelect={() => addPreset(pr)}><Cloud /> {pr.name}</DropdownMenu.Item>
+        {/each}
+        <DropdownMenu.Separator />
+        <DropdownMenu.Item onSelect={addLocal}><Cpu /> Another on-device model</DropdownMenu.Item>
+      </DropdownMenu.Content>
+    </DropdownMenu.Root>
+  {/snippet}
+
+  <div class="flex flex-col gap-3">
+    {#each [...extraLocal, ...cloud] as p (p.id)}
+      <div class="flex flex-col gap-4 rounded-xl border bg-card p-4 shadow-xs">
+        <div class="flex items-center gap-2">
+          <div class="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+            {#if p.kind === "local"}<Cpu class="size-4" />{:else}<Cloud class="size-4" />{/if}
+          </div>
+          <Input class="h-8 w-56 border-transparent bg-transparent px-1.5 font-semibold shadow-none hover:border-input focus-visible:border-ring dark:bg-transparent" bind:value={p.name} oninput={() => app.save()} />
+          <Badge variant="secondary">{STT_KINDS[p.kind].label}</Badge>
+          {#each uses[p.id] ?? [] as u}<Badge class="bg-ember-soft text-ember-text">{u}</Badge>{/each}
+          <span class="flex-1"></span>
+          <Button variant="ghost" size="icon-sm" class="text-muted-foreground hover:text-destructive" title="Remove" onclick={() => remove(p)}><Trash2 /></Button>
+        </div>
+        {#if p.kind === "local"}
+          <div class="flex flex-col gap-1.5">
+            <Label class="text-xs text-muted-foreground">Model</Label>
+            <Choice class="w-full" bind:value={p.model} onchange={() => app.save()} options={models.filter((m) => m.downloaded).map((m) => [m.id, m.name] as const)} />
+          </div>
+        {:else}
+          <div class="grid grid-cols-2 gap-3">
+            <div class="flex flex-col gap-1.5">
+              <Label class="text-xs text-muted-foreground">API key</Label>
+              <div class="flex items-center gap-1">
+                <Input class="bg-background font-mono text-xs md:text-xs" type="password" placeholder="Paste key" bind:value={p.api_key} oninput={() => app.save()} />
+                {#if STT_KINDS[p.kind].keyUrl}
+                  <Button variant="ghost" size="icon-sm" title="Get a key" onclick={() => openUrl(STT_KINDS[p.kind].keyUrl!)}><KeyRound /></Button>
+                {/if}
+              </div>
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <Label class="text-xs text-muted-foreground">Model</Label>
+              <Input class="bg-background font-mono text-xs md:text-xs" bind:value={p.model} oninput={() => app.save()} placeholder={STT_KINDS[p.kind].model} />
+            </div>
+            <div class="col-span-2 flex flex-col gap-1.5">
+              <Label class="text-xs text-muted-foreground">Base URL</Label>
+              <Input class="bg-background font-mono text-xs md:text-xs" bind:value={p.base_url} oninput={() => app.save()} placeholder={STT_KINDS[p.kind].baseUrl} />
+            </div>
+          </div>
+        {/if}
+        <div class="flex items-center gap-3">
+          <Button variant="outline" size="sm" onclick={() => test(p)} disabled={testing[p.id]}>
+            {#if testing[p.id]}<Spinner />{/if} Test
+          </Button>
+          {#if results[p.id]}
+            <span class={cn("selectable flex min-w-0 items-center gap-1.5 text-[13px]", results[p.id].ok ? "text-sage" : "text-destructive")}>
+              {#if results[p.id].ok}<CircleCheck class="size-3.5 shrink-0" />{:else}<CircleX class="size-3.5 shrink-0" />{/if}
+              <span class="break-words">{results[p.id].text}</span>
+            </span>
+          {/if}
+        </div>
+      </div>
+    {:else}
+      <div class="flex flex-col items-center gap-2 rounded-xl border border-dashed px-6 py-8 text-center">
+        <div class="grid size-10 place-items-center rounded-full bg-muted text-muted-foreground"><Cloud class="size-5" /></div>
+        <p class="text-sm font-medium">No cloud providers</p>
+        <p class="max-w-md text-[13px] text-muted-foreground">
+          Add OpenAI, Groq, xAI, Muse, Deepgram, ElevenLabs or AssemblyAI for speaker labels and long files.
+        </p>
+        <Button variant="link" size="sm" class="h-auto text-ember-text" onclick={() => openUrl("https://platform.openai.com/docs/guides/speech-to-text")}>
+          Learn more <ExternalLink />
+        </Button>
+      </div>
+    {/each}
+  </div>
+</Section>

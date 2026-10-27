@@ -48,7 +48,10 @@ slow, later ones reuse it. `electrobun prepare` (run by `bun install`, `dev`, `c
 - `native/hush-native/` is the Swift helper, see below. `scripts/` are build and tooling scripts (Bun).
 - Frontend: `src/routes/*` pages, `src/lib/components`, `src/lib/settings` (settings tabs),
   `src/lib/state.svelte.ts` (global `app` store, event subscriptions, debounced save),
-  `src/app.css` (design tokens + shared classes: `.btn`, `.input`, `.card`, `.chip`, ...).
+  `src/app.css` (Tailwind v4 entry: shadcn theme tokens, Hush extras like `ember`/`sage`/`amber`, `.prose`).
+  UI primitives are [shadcn-svelte](https://shadcn-svelte.com) components in `src/lib/components/ui`
+  (generated: add more with `bunx shadcn-svelte@latest add <name>`, `components.json` maps them to `#lib`),
+  styled with Tailwind utilities. Route scaffolding: `Page.svelte` and `PageHeader.svelte`.
 - Windows: `main` and `overlay` (`/overlay` route, a transparent non-activating panel). Both load the same
   SPA; `window.__hush.window` (injected by `preload`) says which one.
 
@@ -70,8 +73,9 @@ to it only what cannot be done from Bun.
 - Backend events are listed in `DESIGN.md`. Add new ones there and in `state.svelte.ts`.
 - When adding a command or event the UI uses, also add a handler or fixture in
   `src/lib/devmock/index.ts` so the browser preview keeps working.
-- `src/app.css` is plain CSS: no `:global(...)`. Component styles are scoped, so watch for
-  class-name collisions with global classes (e.g. `.live`, `.dot`).
+- Style with Tailwind utilities and the shadcn components; keep scoped `<style>` for what utilities can't
+  express. `src/app.css` has no `:global(...)`. Themes switch on `data-theme` on `<html>` (the `dark:`
+  variant follows it), not on a `.dark` class. Toasts go through `app.toast()` (svelte-sonner).
 - SvelteKit 3: its config lives in `sveltekit({...})` in `vite.config.js` (no `svelte.config.js`); aliases
   go in `package.json` `imports` (`#lib/*`, `#electrobun/view`).
 - Call `shutdownApp()` (app.ts) before the process exits so the helper stops its captures and ggml's
@@ -83,7 +87,8 @@ to it only what cannot be done from Bun.
 - Never log or commit API keys. The devmock settings fixture must keep `api_key` empty.
 - CEF hands the page no paths for dropped files, so drops are uploaded to the media server and then added.
 - Design: serif headings (New York), warm "ink" dark / "paper" light palettes, ember
-  accent. Use the tokens in `app.css` rather than literal colours.
+  accent (`primary`). Use the tokens in `app.css` (`bg-card`, `text-muted-foreground`, `text-ember-text`, ...)
+  rather than literal colours, and the `heading` utility for serif titles.
 
 ## Environment variables
 

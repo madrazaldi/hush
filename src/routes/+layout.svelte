@@ -7,7 +7,8 @@
   import { app } from "#lib/state.svelte.js";
   import { MEDIA_EXTS } from "#lib/media.js";
   import Sidebar from "#lib/components/Sidebar.svelte";
-  import Toasts from "#lib/components/Toasts.svelte";
+  import { Toaster } from "#lib/components/ui/sonner/index.js";
+  import * as SidebarUI from "#lib/components/ui/sidebar/index.js";
   import Onboarding from "#lib/components/Onboarding.svelte";
   import MeetingBanner from "#lib/components/MeetingBanner.svelte";
   import { FileAudio } from "@lucide/svelte";
@@ -91,74 +92,27 @@
 {#if overlay}
   {@render children()}
 {:else}
-  <div class="shell">
+  <SidebarUI.Provider class="h-svh min-h-0 overflow-hidden">
     <Sidebar />
-    <main>
-      <div class="drag" data-drag-region></div>
+    <SidebarUI.Inset class="relative m-2 ml-0 flex min-h-0 flex-col overflow-hidden rounded-xl border shadow-sm [&>:last-child]:min-h-0 [&>:last-child]:flex-1">
+      <div class="absolute inset-x-0 top-0 z-[5] h-9" data-drag-region></div>
       {#if app.settings}
         <MeetingBanner />
         {@render children()}
       {/if}
-    </main>
-  </div>
+    </SidebarUI.Inset>
+  </SidebarUI.Provider>
   {#if dropping}
-    <div class="dropzone">
-      <div class="inner">
-        <FileAudio size={34} strokeWidth={1.5} />
-        <h2>Drop to transcribe</h2>
-        <p class="muted">Audio and video files are added to your queue.</p>
+    <div class="pointer-events-none fixed inset-2.5 z-[90] grid place-items-center rounded-2xl border-2 border-dashed border-ember bg-background/80 backdrop-blur-sm animate-in fade-in-0">
+      <div class="flex flex-col items-center gap-2 text-ember-text">
+        <div class="mb-2 grid size-16 place-items-center rounded-2xl bg-ember-soft"><FileAudio class="size-8" strokeWidth={1.5} /></div>
+        <h2 class="heading text-2xl text-foreground">Drop to transcribe</h2>
+        <p class="text-sm text-muted-foreground">Audio and video files are added to your queue.</p>
       </div>
     </div>
   {/if}
-  <Toasts />
+  <Toaster position="bottom-right" richColors={false} closeButton />
   {#if app.settings && !app.settings.general.onboarded}
     <Onboarding />
   {/if}
 {/if}
-
-<style>
-  .shell {
-    display: flex;
-    height: 100vh;
-  }
-  main {
-    position: relative;
-    flex: 1;
-    min-width: 0;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-  }
-  main > :global(:last-child) {
-    flex: 1;
-    min-height: 0;
-  }
-  .drag {
-    position: absolute;
-    inset: 0 0 auto 0;
-    height: 36px;
-    z-index: 5;
-  }
-  .dropzone {
-    position: fixed;
-    inset: 10px;
-    z-index: 90;
-    display: grid;
-    place-items: center;
-    border-radius: 18px;
-    border: 2px dashed var(--ember);
-    background: color-mix(in srgb, var(--bg) 82%, transparent);
-    backdrop-filter: blur(6px);
-    pointer-events: none;
-  }
-  .inner {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-    color: var(--ember-text);
-  }
-  .inner h2 {
-    color: var(--text);
-  }
-</style>
